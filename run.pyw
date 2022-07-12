@@ -24,23 +24,15 @@ import socket
 import os
 os.chdir(os.path.split(__file__)[0])
 import json
-import ctypes
-import psutil
 import base64
-import pyautogui
 import threading
 import io
-import cv2
-import PIL
 import string
-import random # Used for generating random tokens
+import random
 import time
 import traceback
-import datetime
-import shutil
 import sys
 import signal
-import requests
 import hashlib
 import rsa
 import mimetypes
@@ -122,8 +114,6 @@ class BaseHandler(tornado.web.RequestHandler):
 		drive, fernet_key = json.loads(data)
 		return filesystem.Session(drive=drive).load_from_fernet_key(fernet_key.encode())
 	def get_server_private_key_to_client(self):
-		# CLIENT > SERVER | Decrypt using SERVER PRIVATE KEY
-		# SERVER > CLIENT | Encrypt using CLIENT PUBLIC KEY
 		server_private_key_to_that_client = fernet_decrypt(self.get_secure_cookie("ssl_server_private_key"))
 		server_private_key_to_that_client = server_private_key_to_that_client and server_private_key_to_that_client.decode()
 		return server_private_key_to_that_client
