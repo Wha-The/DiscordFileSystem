@@ -20,9 +20,6 @@ import requests
 import time
 import json
 
-Channel = None
-User = None
-
 def discordhttp(method, *a, **k):
 	k["headers"] = k.get("headers") or {}
 	k["headers"]["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.4844.84 Safari/537.36"
