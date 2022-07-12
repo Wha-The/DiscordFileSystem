@@ -66,11 +66,6 @@ else:
 from aes import AESCipher
 import discordfilesystem as filesystem
 
-@tornado.gen.coroutine
-def sleep(seconds):
-	yield tornado.gen.sleep(seconds)
-
-filesystem.sleep = sleep 
 
 Quote = "infinite exceptionally secure storage"
 
@@ -522,7 +517,6 @@ class App(tornado.web.Application):
 def make_app():
 	settings = {
 		'debug':True,
-		# AutoReload (Uses 2.0%-3.0% of cpu)
 		"cookie_secret":COOKIE_SECRET,
 	}
 	return App([
@@ -581,7 +575,7 @@ if __name__ == "__main__":
 		del process_iter
 	ip = socket.gethostbyname(socket.gethostname())
 	print("Started server")
-	print("Get Control by visiting http://%s:%d/"%(ip,PORT))
+	print("Visit http://%s:%d/"%(ip,PORT))
 
 	tornado.ioloop.PeriodicCallback(app.try_exit, 1000).start()
 	tornado.ioloop.IOLoop.instance().start()
