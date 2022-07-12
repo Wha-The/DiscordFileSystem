@@ -40,7 +40,6 @@ workingcwd = os.path.dirname(os.path.abspath(__file__))
 from zipstream import AioZipStream
 from gzipcompress import GzipCompressReadStream
 import discord_user as discord
-sleep = time.sleep
 if not os.path.isfile(os.path.join(workingcwd, "confidential/token")):
 	open(os.path.join(workingcwd, "confidential/token"), "wb").write(Fernet("lF4RbbaKBERW709fLxlffQz23M6s0s2O8XJAXxVYre8=").encrypt(input("Enter Discord Token: ").encode()))
 	
@@ -69,14 +68,12 @@ class Progression():
 	def progress(self, n=1):
 		self.done += n
 		self.updateListeners()
-
 	def listen(self, callback):
 		self.listeners.append(callback)
 		self.dispatchUpdate(callback)
 	def updateListeners(self):
 		for listener in self.listeners:
 			self.dispatchUpdate(listener)
-			
 	def dispatchUpdate(self, callback):
 		if self.maxprogress == 0:
 			return callback(0)
@@ -163,9 +160,7 @@ class LocalDrive():
 			return os.path.splitext(os.path.split(self.drive_file)[1])[0]
 		return "file:"+self.drive_file.replace(os.environ["USERPROFILE"], r"%user%")
 class Session():
-
 	valid = False
-
 	def __init__(self, key=None, drive="main"):
 		self.drive_key = drive
 		self.retrieve_drive() # make sure drive is valid
@@ -239,20 +234,6 @@ def process_file_upload(uploadfilename, fpath, done, args):
 def upload_file(uploadfilename, fpath, done=lambda:None, args=()):
 	threading.Thread(target=process_file_upload, args=(uploadfilename, fpath, done, args)).start()
 
-"""
-index = {
-	"folder": {
-		"file1": {
-			"size": 20,
-			"downloadurls": [
-				[url, key]
-			]
-		}	
-	},
-}
-
-
-"""
 class PathNotFoundError(Exception): pass
 class FileSystemKeyError(Exception): pass
 class ChecksumMismatch(Exception): pass
@@ -292,7 +273,6 @@ def set_index(Session, data):
 
 	encrypted = b"METADATA: " + json.dumps(metadata).encode() + b"\n" + encrypted
 	Session.drive.write(encrypted)
-
 
 def getPathSegments(path):
 	return [seg for seg in path.split("/") if seg]
@@ -486,9 +466,6 @@ async def create_folder_archive(Session, handle, path, Progress=None):
 	path = normalizePath(path)
 	segments = getPathSegments(path)
 
-	# async def file_streamer(vpath):
-	# 	yield from download(Session, vpath, fhandle)
-
 	TEMP_FOLDER = os.path.join(os.path.join(workingcwd, "temp"), len(segments) == 0 and "root" or segments[-1])
 	if os.path.isdir(TEMP_FOLDER):
 		shutil.rmtree(TEMP_FOLDER)
@@ -508,7 +485,6 @@ async def create_folder_archive(Session, handle, path, Progress=None):
 				mapDirectory(vpath)
 			else:
 				filesmap.append({
-					# "stream": file_streamer(vpath),
 					"file": vpath,
 				})
 	mapDirectory(TEMP_FOLDER)
