@@ -1,0 +1,94 @@
+<!---
+Discord File System
+Copyright (C) 2022  NWhut
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+--->
+
+<!DOCTYPE html>
+<html>
+<head>
+	<title>Login</title>
+	<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+	<script src="/src/srcs"></script>
+	<style>
+		#errmsg {
+			color: red;
+			opacity: 0; 
+		}
+		#errmsg.fadeIn {
+		    opacity: 1;
+		}
+		#overlay {
+		  position: fixed;
+		  display: none;
+		  width: 100%;
+		  height: 100%;
+		  top: 0;
+		  left: 0;
+		  right: 0;
+		  bottom: 0;
+		  background-color: rgba(0,0,0,0.5);
+		  z-index: 2;
+		  cursor: pointer;
+		}
+
+		#overlay_text{
+		  position: absolute;
+		  top: 50%;
+		  left: 50%;
+		  font-family: Helvetica, Sans-Serif;
+		  font-size: 50px;
+		  color: white;
+		  transform: translate(-50%,-50%);
+		  -ms-transform: translate(-50%,-50%);
+		}
+	</style>
+</head>
+<body>
+	<h1>Secure File System &ndash; {{Quote}}</h1><hr>
+	<h1>Head over to <a href="{{href}}">{{href}}</a> on your device.</h1>
+	<a href="/">Return</a><br>
+	<hr>
+	<div id="connections">
+
+	</div>
+<script>
+	(async() => {
+	    while(!window.hasOwnProperty("ENCRYPTION_READY"))
+	        await new Promise(resolve => setTimeout(resolve, 10));
+	   	var displayed_ips = []
+	    var ws = new WebSocket("ws"+(window.location.protocol=="https:"&&"s"||"")+"://"+location.host+"/api/listen_for_new_devices_websocket")
+		ws.onmessage = (event) => {
+			var data = JSON.parse(window.client_decrypt(event.data))
+			console.log(data)
+			if (!displayed_ips.includes(data.connection_ip)){
+				displayed_ips.push(data.connection_ip)
+				document.getElementById("connections").innerHTML += "<div><h1>"+data.connection_ip+" | "+data.user_agent+"</h1><br><button onclick=\"accept(`"+data.connection_ip+"`, this.parentElement)\">Accept Forever</button></div><br><br>"
+			}
+		}
+	})();
+	accept = (ip, div) => {
+		$.post("/api/accept_ip", {
+			"ip": window.client_encrypt(ip)
+		}, (response) => {
+			var data = JSON.parse(window.client_decrypt(response))
+			if (data.success)div.parentElement.removeChild(div)
+			alert(data.message)
+		})
+	}
+</script>
+
+</body>
+</html>

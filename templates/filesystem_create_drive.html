@@ -1,0 +1,107 @@
+<!---
+Discord File System
+Copyright (C) 2022  NWhut
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+--->
+
+<!DOCTYPE html>
+<html>
+<head>
+	<title>Create Drive</title>
+	<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+	<script src="/src/srcs"></script>
+	<style>
+		#errmsg {
+			color: red;
+			font-size: 1.5em;
+		}
+	</style>
+</head>
+<body>
+	<h1>Secure File System &ndash; {{Quote}}</h1><hr>
+	<h1>Create a Drive</h1>
+	<label>
+		Drive Name:
+		<input type="text" placeholder="Drive" width="100%" id="input_drive">(cloud/file supported<sup><a href="javascript:cloudfileprotocolhelp()" tabindex="-1">?</a></sup>)
+	</label><br>
+	<label>
+		Create a Password:
+
+		<input type="password" placeholder="Password" width="100%" id="input_password" onkeyup="if(event.keyCode==13)submit()" autofocus>
+	
+	</label><br>
+	<button type="button" onclick="submit()" id="input_submit">Create</button>
+	<p id="errmsg"></p>
+	<a href="/">Login to your Drive</a>
+
+<script>
+cloudfileprotocolhelp = () => {
+	$.get("/api/get_cloudfile_driveprotocol_help", (data) => alert(window.client_decrypt(data)))
+}
+function submit(){
+	var con = confirm("Are you sure you want to create this drive?\nPlease keep the password in a safe place. If you lose access to the password, you will lose access to the entire drive. THERE IS NO \"RESET PASSWORD\" FEATURE.")
+	if(con)submit_()
+}
+function submit_(){
+	var submit_button = document.getElementById("input_submit")
+	submit_button.setAttribute("disabled", 1)
+	var drive = document.getElementById("input_drive")
+	var password = document.getElementById("input_password")
+	$.post("/create_drive", {
+		"drive": window.client_encrypt(drive.value),
+		"password": window.client_encrypt(password.value),
+	}).done(function(response) {
+		error = response.error
+		if (error){
+			submit_button.innerHTML = "Create"
+			submit_button.removeAttribute("disabled")
+			document.getElementById("errmsg").style.fontSize = "1.5em"
+			document.getElementById("errmsg").style.transition = ""
+			
+			setTimeout(() => {
+				document.getElementById("errmsg").style.transition = "all 0.1s ease-out"
+				document.getElementById("errmsg").style.fontSize = "1em"
+			}, 10)
+			document.getElementById("errmsg").innerHTML = error
+		}
+		else{
+			content = response.content
+			if (content){
+				submit = undefined;
+				alert(response.message)
+				window.location.replace(content)
+			}
+			else{
+				submit_button.innerHTML = "Create"
+				submit_button.removeAttribute("disabled")
+				document.getElementById("errmsg").innerHTML = "Unknown Error, please try again later"
+			}
+		}
+    })
+    .fail(function(jqXHR){
+		submit_button.innerHTML = "Create"
+		submit_button.removeAttribute("disabled")
+        if(jqXHR.status==500){
+			document.getElementById("errmsg").innerHTML = "500 Internal Server Error"
+        }
+        else if(jqXHR.status==0){
+        	document.getElementById("errmsg").innerHTML = "Connection Failed"
+        }
+    });
+}
+</script>
+
+</body>
+</html>

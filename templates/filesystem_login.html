@@ -1,0 +1,223 @@
+<!---
+Discord File System
+Copyright (C) 2022  NWhut
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+--->
+
+<!DOCTYPE html>
+<html>
+<head>
+	<title>Login</title>
+	<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+	<script src="/src/srcs"></script>
+	<style>
+		#errmsg {
+			color: red;
+			opacity: 0; 
+		}
+		#errmsg.fadeIn {
+		    opacity: 1;
+		}
+		#overlay {
+		  position: fixed;
+		  display: none;
+		  width: 100%;
+		  height: 100%;
+		  top: 0;
+		  left: 0;
+		  right: 0;
+		  bottom: 0;
+		  background-color: rgba(0,0,0,0.5);
+		  z-index: 2;
+		  cursor: pointer;
+		}
+
+		#overlay_text{
+		  position: absolute;
+		  top: 50%;
+		  left: 50%;
+		  font-family: Helvetica, Sans-Serif;
+		  font-size: 50px;
+		  color: white;
+		  transform: translate(-50%,-50%);
+		  -ms-transform: translate(-50%,-50%);
+		}
+	</style>
+</head>
+<body>
+	<h1>Secure File System &ndash; {{Quote}}</h1><hr>
+	<h1>Login to your Drive</h1>
+	<label>
+		Drive:
+		<select id="input_drive" value="main">
+
+		</select><a href="javascript:add_cloud_drive()">cloud/file</a><sup><a href="javascript:cloudfileprotocolhelp()" tabindex="-1">?</a></sup>
+	</label><br>
+	<label>
+		Password:
+
+		<input type="password" placeholder="Password" width="100%" id="input_password" onkeyup="if(event.keyCode==13)submit()" autofocus>
+	
+	</label><br>
+	<button type="button" onclick="submit()" id="input_submit">Login</button>
+	<p id="errmsg"></p>
+	<a href="/create_drive">Create a Drive</a><br>
+	{%if connectingFromLocalMachine%}
+	<a href="/allow-new-device">Allow a new device to use your portal to access their drives (either on the cloud or local)</a>
+	{%end%}
+
+	<div id="overlay">
+	  <div id="overlay_text">Drop</div>
+	</div>
+<script>
+cloudfileprotocolhelp = () => {
+	$.get("/api/get_cloudfile_driveprotocol_help", (data) => alert(window.client_decrypt(data)))
+}
+function escapeHtml(unsafe){
+    return unsafe
+         .replace(/&/g, "&amp;")
+         .replace(/</g, "&lt;")
+         .replace(/>/g, "&gt;")
+         .replace(/"/g, "&quot;")
+         .replace(/'/g, "&#039;");
+ }
+ function add_drive_after(drive){
+ 	document.getElementById("input_drive").innerHTML += "<option value=\""+escapeHtml(drive)+"\">"+escapeHtml(drive)+"</option>"
+	document.getElementById("input_drive").value = escapeHtml(drive)
+ }
+function add_cloud_drive(){
+	var drive = prompt("Drive: ")
+	if(drive)add_drive_after(drive)
+}
+function fetch_drives(){
+	$.get("/api/fetch_local_drives", (response) => {
+		var drives = JSON.parse(window.client_decrypt(response))
+		drives.forEach((drive) => {
+			document.getElementById("input_drive").innerHTML += "<option value=\""+escapeHtml(drive)+"\">"+escapeHtml(drive)+"</option>"
+			if(escapeHtml(drive) == "main"){
+				document.getElementById("input_drive").value = escapeHtml(drive)
+			}
+			
+		})
+		
+	})
+}
+(async() => {
+    while(!window.hasOwnProperty("ENCRYPTION_READY"))
+        await new Promise(resolve => setTimeout(resolve, 10));
+    fetch_drives()
+})();
+function flash(txt){
+	document.getElementById("errmsg").style.transition = ""
+	document.getElementById("errmsg").className = "";
+	
+	setTimeout(() => {
+		document.getElementById("errmsg").style.transition = "opacity 0.5s"
+		document.getElementById("errmsg").className += "fadeIn";
+	}, 10)
+	document.getElementById("errmsg").innerHTML = txt
+}
+function submit(){
+	var submit_button = document.getElementById("input_submit")
+	submit_button.setAttribute("disabled", 1)
+	var drive = document.getElementById("input_drive")
+	var password = document.getElementById("input_password")
+	document.getElementById("errmsg").innerHTML = ""
+	$.post("/", {
+		"drive": window.client_encrypt(drive.value),
+		"password": window.client_encrypt(password.value),
+	}).done(function(response) {
+		response = JSON.parse(window.client_decrypt(response))
+		error = response.error
+		if (error){
+			submit_button.removeAttribute("disabled")
+			flash(error)
+		}
+		else{
+			content = response.content
+			if (content){
+				submit = undefined;
+				window.location.replace(content)
+			}
+			else{
+				submit_button.removeAttribute("disabled")
+				flash("Unknown Error, please try again later")
+			}
+		}
+    })
+    .fail(function(jqXHR){
+		submit_button.removeAttribute("disabled")
+        if(jqXHR.status==500){
+        	flash("500 Internal Server Error")
+        }
+        else if(jqXHR.status == 0){
+        	flash("Connection Failed")
+        }
+        else if(jqXHR.status == 401){
+        	flash("401 Unauthorized: Please reload the page <button onclick=window.location.reload()>Reload</button>")
+        }
+    });
+
+}
+
+function handleFiles(files) {
+	var file = files[0]
+	const reader = new FileReader();
+	reader.addEventListener('load', (event) => {
+		const result = event.target.result;
+		var firstLine = result.split(/\r?\n/)[0]
+		if(firstLine&&firstLine.startsWith("METADATA: ")){
+			var metadata = firstLine.slice(("METADATA: ").length);
+			var d = JSON.parse(metadata)
+			if(d&&d.location){
+				add_drive_after(d.location)
+			}
+		}
+	});
+	reader.readAsText(file);
+}
+var dragTimer;
+function drop(e) {
+	document.getElementById("overlay").style.display = "none";
+	const dt = e.originalEvent.dataTransfer;
+	const files = dt.files;
+
+	handleFiles(files);
+}
+var dropbox = document.querySelector("html")
+var dragTimer;
+$(dropbox).on("dragenter dragstart dragend dragleave dragover drag drop", function (e) {
+		e.preventDefault();
+});
+$(dropbox).on('dragover', function(e) {
+	var dt = e.originalEvent.dataTransfer;
+	if (dt.types && (dt.types.indexOf ? dt.types.indexOf('Files') != -1 : dt.types.contains('Files'))) {
+		document.getElementById("overlay").style.display = "block";
+		document.getElementById("overlay_text").innerHTML = "Drop your .sfsdrive file"
+		window.clearTimeout(dragTimer);
+	}
+});
+$(dropbox).on('dragleave', function(e) {
+	dragTimer = window.setTimeout(function() {
+		document.getElementById("overlay").style.display = "none";
+	}, 25);
+});
+
+$(dropbox).on("drop",drop)
+
+</script>
+
+</body>
+</html>

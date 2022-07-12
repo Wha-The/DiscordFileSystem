@@ -1,0 +1,895 @@
+<!---
+Discord File System
+Copyright (C) 2022  NWhut
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+--->
+
+<head>
+	<title>Secure File System - {{Quote}}</title>
+	<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+	<script src="/src/srcs"></script>
+	<style>
+		.noSelect {
+			 -moz-user-select: -moz-none;
+			 -khtml-user-select: none;
+			 -webkit-user-select: none;
+			 -ms-user-select: none;
+			 user-select: none;
+		}
+		.specialborders {
+			outline: solid 5px #FC5185;
+		}
+		#overlay {
+		  position: fixed;
+		  display: none;
+		  width: 100%;
+		  height: 100%;
+		  top: 0;
+		  left: 0;
+		  right: 0;
+		  bottom: 0;
+		  background-color: rgba(0,0,0,0.5);
+		  z-index: 2;
+		  cursor: pointer;
+		}
+
+		#overlay_text{
+		  position: absolute;
+		  top: 50%;
+		  left: 50%;
+		  font-family: Helvetica, Sans-Serif;
+		  font-size: 50px;
+		  color: white;
+		  transform: translate(-50%,-50%);
+		  -ms-transform: translate(-50%,-50%);
+		}
+		body {
+			font-family: Helvetica, Sans-Serif;
+		}
+		.left_25 {
+			position: absolute;
+			left:25%;
+		}
+		.left_50 {
+			position: absolute;
+			left:50%;
+		}
+		.left_75 {
+			position: absolute;
+			left:75%;
+		}
+		.sticky {
+		  position: fixed;
+		  top: 0;
+		  width: 100%
+		}
+
+		#actionbar{
+			border-radius: 3px;
+			background-color: aliceblue;
+			z-index: 2;
+		}
+		#actionbar button {
+			height: 30px;
+			width: 100px;
+			font-size: 15px;
+		}
+	</style>
+</head>
+<body>
+	<h1>Secure File System &ndash; {{Quote}}</h1><hr>
+	<p id="errmsg" style="color:red;"></p>
+	<h1><b id="drive"></b><b id="cwd"></b></h1>
+	<hr>
+	<div id="actionbar">
+		<button id="actionbar_refresh" disabled>Refresh</button>
+		<button id="actionbar_cd" disabled>CD</button>
+		<button id="actionbar_download" disabled>Download</button>
+		<button id="actionbar_edit" disabled>Quick Open</button>
+		<button id="actionbar_upload" disabled>Upload</button>
+		<button id="actionbar_newFolder" disabled>New Folder</button>
+		<button id="actionbar_rename" disabled>Rename</button>
+		<button id="actionbar_delete" disabled>Delete</button>
+
+
+	</div>
+	<div id="files">
+
+
+
+
+	</div>
+	<hr>
+	<br><br><br>
+	<p>Current status: <b id="status"></b></p>
+	<button type="button" onclick="connect()">Connect</button>
+	<button type="button" onclick="disconnect()">Disconnect</button>
+	<hr>
+	<div id="settings">
+		<h1>Settings</h1>
+		<label><input type="checkbox" id="settings_autoconnect" onchange="save_settings()"> Automacticly connect</label><br>
+		<label><input type="checkbox" id="settings_temporarysession" onchange="save_settings()" checked> Temporary Session</label>
+
+	</div>
+	<hr>	 
+	<br><br><button onclick="window.location.href='/logout';">Logout</button>
+
+
+	<input id="file-input" type="file" name="name" style="display: none;" multiple onchange="handleFiles(this.files)"/>
+	<div id="overlay">
+	  <div id="overlay_text">Drop files to upload to the CWD</div>
+	</div>
+
+	<script>
+		JQueryNotLoadedHelp = "Please refresh your page or contact the server owner"
+		$ = window.$||alert("JQuery was not properly loaded! "+JQueryNotLoadedHelp)
+		ws = null;
+		expectedstatus="disconnected"
+		function disconnect(){
+			expectedstatus = "disconnected"
+			if (ws){
+				ws.close()
+				ws = null
+			}
+		}
+		systemFilenames = [
+			".."
+		]
+		SAVED_CWD = "/"
+		Settings = [
+			document.getElementById("settings_autoconnect"),
+			document.getElementById("settings_temporarysession"),
+		]
+		CURRENTSETTINGS = {}
+		function save_settings(){
+			ToBeSaved = {}
+			for (i=0;i<Settings.length;i++){
+				currentelem = Settings[i]
+				ToBeSaved[currentelem.id] = currentelem.checked
+			}
+			CookieManager.setCookie("filesystem_settings",JSON.stringify(ToBeSaved), 1)
+			CURRENTSETTINGS = ToBeSaved
+			showsnack("Changes Saved",1000)
+		}
+		function load_settings(){
+			Settings_raw = CookieManager.getCookie("filesystem_settings")
+			if (Settings_raw!=""){
+				Loaded_settings = JSON.parse(Settings_raw)
+				CURRENTSETTINGS = Loaded_settings
+				Object.keys(Loaded_settings).forEach(function(key){
+					checked = Loaded_settings[key]
+					if(checked!=null){
+						document.getElementById(key).checked = checked
+					}
+				})
+
+				return Loaded_settings
+			}
+			return {};
+		}
+		loadedfuncfinished = Scripts.runAfterLoaded("CookieManager", function(){
+			var settings = load_settings()
+			if(settings["settings_autoconnect"]){
+				connect()
+			}
+			window.addEventListener("beforeunload", function(e){
+				var settings = load_settings()
+				if((settings["settings_temporarysession"] == undefined)||(settings["settings_temporarysession"] == true)){
+					CookieManager.setCookie("FileSystem_SessionInfo", "")
+				}
+			}, false);
+		})
+		function updateFilesList(files, drive, cwd){
+			if(cwd!="/")files.unshift({"name":"..","isfile":false})
+			document.getElementById("cwd").innerHTML = cwd
+			document.getElementById("drive").innerHTML = drive+":"
+			window.history.pushState("", "", '/filesystem'+cwd);
+			SAVED_CWD = cwd
+			div = document.getElementById("files")
+			fileListData = ""
+			for (i=0;i<files.length;i++){
+				current = files[i]
+				currentAdd = ""
+				dotslips = current.name.split(".")
+				ext = current.isfile&&(dotslips[dotslips.length - 1]||"unknown")||"folder"
+				extcode = "["+ext+"]"
+				colors = {
+					"folder":"orange",
+					"txt":"blue",
+					"mp4":"gray",
+					"mov":"gray",
+					"png":"lightblue",
+					"jpg":"lightblue"
+				}
+				if (colors[ext]){
+					extcode = "<font color='"+colors[ext]+"'>["+ext+"]</font>"
+				}
+				if (current.protected){
+					extcode = "<font color='red'>["+ext+"*]</font>"
+				}
+				allfilestring = []
+				currentfileindex = 0
+				if(current.filesinside){
+					current.filesinside.forEach(function(file){
+						if (currentfileindex == 3){
+							allfilestring.push("...")
+						}
+						else if (currentfileindex>3){
+							return
+						}
+						else{
+							allfilestring.push(file)
+						}
+						currentfileindex = currentfileindex + 1
+					})
+				}
+				currentAdd = "<p isfile='"+((current.isfile&&2||1)-1)+"' filename='"+current.name+"' ondblclick='doubleclick(event,this)' onclick='select(\""+current.name+"\")' style='cursor:pointer' id='file_"+current.name+"' class='noSelect'>"+extcode+" "+current.name+(systemFilenames.includes(current.name)&&"<font class='left_25'>System Path</font>"||
+				`<font class="left_25">Size: `+current.size+`</font>
+				`+
+				(current.protected&&"<font class='left_50'>Hidden</font>"||(current.filesinside&&current.filesinside.length>0 && `<font class="left_50">Files: [`+current.filesinside.length+`] `+allfilestring.join("<b>, </b>")+"</font>"||"<font class='left_50'></font>"))
+				+"</p>"	
+
+				)
+
+				fileListData = fileListData +"\n"+currentAdd
+			}
+			div.innerHTML = fileListData
+		}
+		function link_enter_button(target,callback){
+			target.addEventListener("keyup", function(event) {
+				value = target.value
+				event.preventDefault();
+			  setTimeout(function(){
+				  if (event.keyCode === 13) {
+				    callback(value);
+				  }
+				 },25)
+			});
+		}
+		REFRESH_AFTERFUNC = null
+		function _connect(reconnection){
+			if (reconnection){
+				console.log("reconnection")
+			}
+			document.getElementById("status").innerHTML = "Connecting..."
+			ws = {}
+			try{
+				wss = new WebSocket("ws"+(window.location.protocol=="https:"&&"s"||"")+"://"+location.host+"/api/websocket");
+			}
+			catch(e){
+				ws = null
+				document.getElementById("errmsg").innerHTML = "Connection attempt failed!"
+				return
+			}
+
+
+			wss.onopen = function() {
+				document.getElementById("status").innerHTML = "Connected"
+				expectedstatus = "live"
+				location.pathname.split(/\//g).slice(2).forEach(function(segment){
+					if(segment){
+						cd(segment)
+					}
+				})
+				cd(".")
+			};
+			var sounds = {
+				click:new Audio('/resource?filename=click.mp3'),
+				error:new Audio('/resource?filename=error.mp3'),
+			}
+			ws.onmessage = function (evt) {
+				document.getElementById("status").innerHTML = "Connected"
+				response = JSON.parse(evt.data)
+				error = response.error
+				redirect = response.redirect
+				console.log(response)
+				if (error){
+					document.getElementById("errmsg").innerHTML = error
+				}
+				else if (redirect){
+					window.location.href = redirect
+				}
+				else{
+					content = response.content
+					previousAction = response.action
+					if (previousAction == "cd"){
+						if (response.passwordRequired){
+							if(response.passwordIncorrect)alert("Incorrect password")
+							// document.getElementById("overlay_text").innerHTML = `
+							// Password Required: Please enter the password to this directory.
+							// <br>
+							// <input type="password" id='cd_password_input' placeholder="password" autocomplete="off" autocorrect="off" autocapitalize="off"><br>
+							// <button onclick="document.getElementById('overlay').style.display = 'none';">Close</button>
+							// <button onclick='cd("`+response.cd+`",document.getElementById("cd_password_input").value)' id="cd_password_input_button">CD</button>
+							// `
+							// input = document.getElementById("cd_password_input")
+							// link_enter_button(input,function(value){	
+							// 	cd(response.cd,value)
+							// })
+							// document.getElementById("overlay").style.display = "block"
+							// input.focus()
+							var value = prompt("Password Required: Enter password for "+(SAVED_CWD+response.cd))
+							if(value)cd(response.cd, value)
+						}
+						else{
+							sounds.click.play();
+							document.getElementById('overlay').style.display = 'none';
+							ws.send(JSON.stringify({"action":"getCDContents"}))
+						}
+
+					}
+					if (previousAction == "getCDContents"){
+
+						updateFilesList(response.files, response.drive, response.cwd)
+						if (response.afterselect){
+							SELECTED = response.afterselect
+						}
+						else{
+							SELECTED = null
+						}
+						update()
+						if(REFRESH_AFTERFUNC){
+							REFRESH_AFTERFUNC()
+							REFRESH_AFTERFUNC=null
+						}
+					}
+					if (previousAction == "delFile"){
+						refreshDirectory()
+						SELECTED = null
+						update()
+					}
+					if (previousAction == "uploadFile"){
+						if (response.afterselect){
+							refreshDirectory(response.afterselect)
+						}
+					}
+					if (previousAction == "newFolder"){
+						if (response.afterselect){
+							afselect = response.afterselect
+							refreshDirectory(null,function(){
+								select(afselect)
+								rename(afselect)
+							})
+						}
+					}
+				}
+			}
+
+			wss.onclose = function(){
+				console.log("closed")
+				document.getElementById("status").innerHTML = "Disconnected"
+				if (expectedstatus!="disconnected"){
+					connect(true)
+				}
+			}
+			wss.onmessage = function(evt){
+				(async() => {
+				    while(!window.hasOwnProperty("ENCRYPTION_READY"))
+				        await new Promise(resolve => setTimeout(resolve, 10));
+				    ws.onmessage({
+						"data": window.client_decrypt(evt.data),
+					})
+				})();
+			}
+			ws.send = function(data){
+				(async() => {
+				    while(!window.hasOwnProperty("ENCRYPTION_READY"))
+				        await new Promise(resolve => setTimeout(resolve, 10));
+				    wss.send(window.client_encrypt(data))
+				})();
+			}
+			ws.close = () => wss.close
+		};
+		function connect(reconnection){
+			(async() => {
+			    while(!window.hasOwnProperty("ENCRYPTION_READY"))
+			        await new Promise(resolve => setTimeout(resolve, 10));
+			    _connect(reconnection)
+			})();
+		}
+		SELECTED = null
+		function pingws(noalert){
+			if (!ws){
+				if (!noalert)alert("Please connect to the server.")
+				return false
+			}
+			return true
+		}
+		
+		
+		function cd(dir,password){
+			if (!pingws())return
+			try{
+				if (!popup.closed){alert("Popup window still open. Close it to change directory");return}
+			}
+			catch(e){
+
+			}
+			
+			dir = dir||SELECTED
+			if(dir){
+				data = JSON.stringify({"action":"cd","data":{"dir":dir,"password":password}})
+				console.log("CD SEND DATA: "+data)
+				ws.send(data)
+			}
+		}
+		function download(){
+			if (!pingws())return
+			if(SELECTED)ws.send(JSON.stringify({"action":"downloadFile","data":{"file":SELECTED}}))
+		}
+		function upload(){
+			document.getElementById("file-input").click()
+		}
+		function rename(file){
+			elem = document.getElementById("file_"+file)
+			origInnerHtml = elem.innerHTML
+			elem.innerHTML = "<input type='text' id='rename_"+file+"' value='"+elem.getAttribute("filename")+"' placeholder='new name' style='width:100%;max-width:100%'>"
+			renameelem = document.getElementById("rename_"+file)
+			renameelem.select()
+			renameelem.addEventListener("keyup", function(event) {
+				event.preventDefault();
+					// Number 13 is the "Enter" key on the keyboard
+					setTimeout(function(){
+						if (event.keyCode === 13) {
+							// Cancel the default action, if needed
+							
+							after = renameelem.value
+							ws.send(JSON.stringify({action:"renFile",data:{from:file,to:after}}))
+							refreshDirectory(after)
+
+						}
+						if (event.keyCode === 27){ // esc
+							elem.innerHTML = origInnerHtml
+						}
+					},25)
+				});
+		}
+		recentdoubleclick = false
+		function select(file){
+			setTimeout(function(){
+				if (!pingws())return
+				if (recentdoubleclick){
+					recentdoubleclick=false
+					return
+				}
+				if (SELECTED == file){
+					if (systemFilenames.includes(file)){
+						return
+					}
+
+				}
+				else{
+					SELECTED = file
+					update()
+				}
+			},10)
+		}
+		function getFileDownloadLink(fname, finish, view){
+			if (!pingws())return
+			var OLDWSONMESSAGEHANDLER = ws.onmessage
+			var retrievedData = null
+			ws.onmessage = function(data){
+				response = JSON.parse(data.data)
+				if (response.redirect){
+					ws.onmessage = OLDWSONMESSAGEHANDLER
+					finish(response.redirect)
+				}
+			}
+			ws.send(JSON.stringify({"action": (view ? "view" : "download")+"File","data":{"file":fname}}))
+		}
+		function getFileContents(fname,finish){
+			if (!pingws())return
+			getFileDownloadLink(fname, function(redirect){
+				var xhr = new XMLHttpRequest();
+				xhr.onreadystatechange = function(){
+				    if (this.readyState == 4 && this.status == 200){
+				        var url = window.URL || window.webkitURL;
+				        var a = new FileReader();
+						a.onload = function(e) {finish(e.target.result);}
+						a.readAsDataURL(this.response);
+				        
+				    }
+				}
+				xhr.open('GET', redirect);
+				xhr.responseType = 'blob';
+				xhr.send();  
+			})
+			
+		}
+		var edit_callbacks = {
+			".txt": edittxt,
+			".mp4": editmp4,
+			".mov": editmp4,
+			".png": editpng,
+			".jpg": editpng
+		}
+		function edit(evt){
+			if(evt.ctrlKey){
+				getFileDownloadLink(SELECTED, window.open, true)
+				return
+			}
+			var s = SELECTED.toLowerCase()
+			Object.entries(edit_callbacks).forEach(x => {
+				var suffix = x[0], callback = x[1]
+				if(s.endsWith(suffix))callback()
+			})
+		}
+		function editpng(){
+				
+				getFileDownloadLink(SELECTED, function(url){
+					popup = window.open("","Image Viewer","width=600,height=500")
+					writedata = `
+	<title>Image Viewer</title>
+	<img src="`+url+`" width=100% height=100% style="object-fit: cover;">
+					`
+					popup.$ = $
+					popup.document.write(writedata)
+				})
+					
+			}	
+		function editmp4(){
+			
+			getFileDownloadLink(SELECTED, function(url){
+				popup = window.open("","Video Player","width=1000,height=500")
+				writedata = `
+<title>Video Player</title>
+<video controls width="100%" height="100%" id="player">
+
+    <source src="`+url+`"
+            type="video/mp4">
+
+    Sorry, your browser doesn't support embedded videos.
+</video>
+				`
+				popup.$ = $
+				popup.document.write(writedata)
+				var v = popup.document.getElementById("player");
+				v.addEventListener( "loadedmetadata", function (e) {
+				    var width = this.videoWidth,
+				        height = this.videoHeight;
+				    popup.resizeTo(width, height)
+				}, false );
+			})
+				
+		}
+
+		function edittxt(){
+
+			var currentFName = SELECTED
+			getFileContents(SELECTED,function(data){
+				popup = window.open("","Editor","width=500,height=500")
+				writedata = `
+<title>Editor</title>
+<style>
+#snackbar {
+  visibility: hidden;
+  min-width: 250px;
+  margin-left: -125px;
+  background-color: #333;
+  color: #fff;
+  text-align: center;
+  border-radius: 25px;
+  padding: 16px;
+  position: fixed;
+  z-index: 1;
+  left: 50%;
+  bottom: 30px;
+  font-size: 17px;
+  font-family: Helvetica, Sans-Serif;
+}
+
+#snackbar.show {
+  visibility: visible;
+  -webkit-animation: fadein 0.5s, fadeout 0.5s 2.5s;
+  animation: fadein 0.5s, fadeout 0.5s 2.5s;
+}
+
+</style>
+<textarea style="width:100%;height:90%" id="editor">
+`+data+`
+</textarea>
+<div id="snackbar">Some text some message..</div>
+<sc`+`ript>
+saved = true
+keydown = function(event) {
+    if (event.ctrlKey || event.metaKey) {
+        switch (String.fromCharCode(event.which).toLowerCase()) {
+        case 's':
+            event.preventDefault();
+            save()
+            break;
+        case 'f':
+            event.preventDefault();
+            alert('ctrl-f');
+            break;
+        case 'g':
+            event.preventDefault();
+            alert('ctrl-g');
+            break;
+        }
+    }
+}
+$(window).bind('keydown', keydown);
+$("#editor").bind('keydown', keydown);
+document.getElementById("editor").oninput = function(){
+	saved = false
+}
+
+function showsnack(text,timeout) {
+  var x = document.getElementById("snackbar");
+  x.className = "show";
+  x.innerHTML = text||x.innerHTML
+  close = function(){ x.className = x.className.replace("show", ""); }
+  if(timeout!=false){
+  	return setTimeout(close, timeout||3000);
+  }
+  return close
+
+
+}
+
+</sc`+`ript>
+				`
+				popup.$ = $
+				popup.document.write(writedata)
+				popup.addEventListener('beforeunload', function (e) {
+					if (!popup.saved){
+					  e.preventDefault();
+					  e.returnValue = 'Changes will not be saved';
+					}
+					});
+
+
+				popup.save = function(){
+					var data = popup.document.getElementById("editor").value
+					var file = new File([data], currentFName, {
+					    lastModified: new Date(0),
+					    type: "overide/mimetype"
+					});
+					var finishedUploading = []
+					async function uploadSingleFile(file,done){
+						console.log(file)
+						
+						let formData = new FormData();    
+						     
+						formData.append("file", file);
+						formData.append("data", JSON.stringify({"path":SAVED_CWD, "last_modified":file.lastModified / 1000}));  
+
+						try {
+						   let r = await fetch('/api/upload', {method: "POST", body: formData}); 
+						   console.log('HTTP response code:',r.status); 
+						   done()
+						} catch(e) {
+						   console.log('Huston we have problem...:', e);
+						   uploadSingleFile(file, done)
+						}
+					}
+					uploadSingleFile(file,function(){
+						refreshDirectory(currentFName)
+						popup.showsnack("Saved Sucessfully")
+						popup.saved = true
+					})
+				}
+			})
+
+		}
+		
+		function doubleclick(evt,elem){
+			evt.preventDefault()
+			if (!pingws())return
+			recentdoubleclick = true
+			fname = elem.getAttribute("filename")
+			isfile = elem.getAttribute("isfile")=="1"
+			if (isfile){
+				download(fname)
+			}
+			else{
+				cd(fname)
+			}
+
+			
+		}
+		function update(){
+			if (!pingws())return
+			elems = document.getElementById("files").children
+			for (i=0;i<elems.length;i++){
+				elem = elems[i]
+				elem.style.backgroundColor = "white"
+				elem.style.color = "black"
+			}
+			actionbar_refersh = true
+			actionbar_cd = false
+			actionbar_download = false
+			actionbar_edit = false
+			actionbar_upload = true
+			actionbar_newFolder = true
+			actionbar_rename = false
+			actionbar_delete = false
+
+			if (SELECTED){
+				elem = document.getElementById("file_"+SELECTED)
+				isfile = elem.getAttribute("isfile")=="1"
+				elem.style.backgroundColor = "black"
+				elem.style.color = "white"
+				actionbar_download = true
+				actionbar_delete = true
+				actionbar_rename = true
+				if (isfile){
+					var canEdit = false;
+					Object.entries(edit_callbacks).forEach(x => {
+						var suffix = x[0]
+						if(SELECTED.toLowerCase().endsWith(suffix)){
+							canEdit = true
+						}
+					})
+					if(canEdit){
+						actionbar_edit = true
+					}
+				}	
+				else{
+					actionbar_cd = true
+				}
+			}
+			if (systemFilenames.includes(SELECTED)){
+				actionbar_delete = false
+				actionbar_download = false
+			}
+			document.getElementById("actionbar_refresh")[actionbar_refersh&&"removeAttribute"||"setAttribute"]("disabled",true)
+			document.getElementById("actionbar_cd")[actionbar_cd&&"removeAttribute"||"setAttribute"]("disabled",true)
+			document.getElementById("actionbar_download")[actionbar_download&&"removeAttribute"||"setAttribute"]("disabled",true)
+			document.getElementById("actionbar_edit")[actionbar_edit&&"removeAttribute"||"setAttribute"]("disabled",true)
+			document.getElementById("actionbar_upload")[actionbar_upload&&"removeAttribute"||"setAttribute"]("disabled",true)
+			document.getElementById("actionbar_newFolder")[actionbar_newFolder&&"removeAttribute"||"setAttribute"]("disabled",true)
+			document.getElementById("actionbar_rename")[actionbar_rename&&"removeAttribute"||"setAttribute"]("disabled",true)
+			document.getElementById("actionbar_delete")[actionbar_delete&&"removeAttribute"||"setAttribute"]("disabled",true)
+		}
+		function refreshDirectory(afterselect,afterfunc){
+			if(afterfunc)REFRESH_AFTERFUNC = afterfunc
+			if (!pingws())return
+			ws.send(JSON.stringify({"action":"getCDContents",data: {afterselect:afterselect}}))
+		}
+		window.refreshDirectory = refreshDirectory
+	
+	document.getElementById("actionbar_refresh").onclick = ()=> refreshDirectory()
+	document.getElementById("actionbar_cd").onclick = function(){cd()}
+	document.getElementById("actionbar_download").onclick = download;
+	document.getElementById("actionbar_edit").onclick = edit;
+	document.getElementById("actionbar_upload").onclick = upload;
+	document.getElementById("actionbar_newFolder").onclick = function(){
+		if(!pingws())return
+		ws.send(JSON.stringify({"action":"newFolder"}))
+	}
+	document.getElementById("actionbar_delete").onclick = function(){
+		if (confirm("Are you sure you want to delete "+document.getElementById("file_"+SELECTED).innerText+"?")){
+			ws.send(JSON.stringify({action:"delFile",data:{file:SELECTED}}))
+		}
+	}
+
+	document.getElementById("actionbar_rename").onclick = function(){
+		rename(SELECTED)
+	}
+
+
+
+	// uploading
+	fileinput = document.getElementById("file-input");
+	fileinput.addEventListener("change", handleFiles, false);
+	toBase64 = file => new Promise((resolve, reject) => {
+			const reader = new FileReader();
+			reader.readAsDataURL(file);
+			reader.onload = () => resolve(reader.result);
+			reader.onerror = error => reject(error);
+	});
+	function getFileBase64(file,done){
+		 const result = toBase64(file).then(res => done(res.split(",")[1])).catch(e => Error(e));
+		 if(result instanceof Error) {
+				console.log('Error: ', result.message);
+				return;
+		 }
+		 
+	}
+	function handleFiles(files) {
+		console.log(files)
+		finishedUploading = []
+		async function uploadSingleFile(file,i, attemptNumber){
+			attemptNumber=attemptNumber||0
+			console.log(file)
+			if(file.size >= (10485760000)){
+				alert("Unable to upload "+file.name+":\nFile exceeds 10GB.")
+			   	finishedUploading[i] = true
+			   	return
+			}
+			
+			let formData = new FormData();    
+			     
+			formData.append("file", file);
+			formData.append("data", JSON.stringify({"path":SAVED_CWD, "last_modified":file.lastModified / 1000}));  
+
+			try {
+			   fetch('/api/upload', {method: "POST", body: formData}).then(function(r){
+			   	console.log('HTTP response code:',r.status); 
+			   	finishedUploading[i] = true
+			   }); 
+			   
+			} catch(e) {
+			   console.log('Huston we have problem...:', e);
+			   if (attemptNumber >= 3){
+			   	alert("Unable to upload "+file.name+":\n"+e)
+			   	finishedUploading[i] = true
+			   }
+			   else{
+			   	uploadSingleFile(file, i, attemptNumber + 1)
+			   }
+			}
+		}
+
+		for (var i=0;i<files.length;i++){
+			file = files[i]
+			finishedUploading[i] = false
+			uploadSingleFile(file,i)
+		}
+		i = setInterval(function(){
+			if(finishedUploading.every(function(item){return item==true})){
+				console.log("done")
+				clearInterval(i)
+				refreshDirectory()
+			}
+		},100)
+	}
+	var dragTimer;
+	function drop(e) {
+		dropbox.classList.remove("specialborders")
+		document.getElementById("overlay").style.display = "none";
+		if(!pingws())return
+		const dt = e.originalEvent.dataTransfer;
+		const files = dt.files;
+
+		handleFiles(files);
+	}
+	dropbox = document.body
+	var dragTimer;
+	$(dropbox).on("dragenter dragstart dragend dragleave dragover drag drop", function (e) {
+			e.preventDefault();
+	});
+	$(dropbox).on('dragover', function(e) {
+		var dt = e.originalEvent.dataTransfer;
+		if (dt.types && (dt.types.indexOf ? dt.types.indexOf('Files') != -1 : dt.types.contains('Files'))) {
+			dropbox.classList.add("specialborders")
+			document.getElementById("overlay").style.display = "block";
+			document.getElementById("overlay_text").innerHTML = pingws(true)?"Drop files to upload to the CWD":"Please connect to the server first"
+			window.clearTimeout(dragTimer);
+		}
+	});
+	$(dropbox).on('dragleave', function(e) {
+		dragTimer = window.setTimeout(function() {
+			dropbox.classList.remove("specialborders")
+			document.getElementById("overlay").style.display = "none";
+		}, 25);
+	});
+
+	$(dropbox).on("drop",drop)
+
+
+var actionbar = document.getElementById("actionbar");
+
+var sticky = actionbar.offsetTop;
+window.onscroll = function() {
+ window.pageYOffset > sticky ? actionbar.classList.add("sticky") : actionbar.classList.remove("sticky")
+}
+
+
+
+	</script>
+</body>
