@@ -40,6 +40,9 @@ import base64
 from cryptography.fernet import Fernet
 from hurry.filesize import size as toString_filesize
 
+if not os.path.isdir("temp"):
+	os.mkdir("temp")
+
 if not os.path.isdir("confidential"):
 	os.mkdir("confidential")
 if not os.path.isdir("confidential/drives"):
