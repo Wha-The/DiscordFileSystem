@@ -1,24 +1,11 @@
-"""
-Discord File System
-Copyright (C) 2022  NWhut
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""
-
 import requests
 import time
 import json
+try:
+	from requests_toolbelt import (MultipartEncoder,
+                               MultipartEncoderMonitor)
+except ImportError:
+	MultipartEncoder, MultipartEncoderMonitor = None, None
 
 def discordhttp(method, *a, **k):
 	k["headers"] = k.get("headers") or {}
@@ -43,7 +30,29 @@ class User():
 		self.token = token
 	def login(self, token):
 		self.token = token
+	def send_op_prep(self, channelid, files, progressCallback):
+		attachments = [{
+						"id": fid,
+						"filename": attachmentdata["filename"],
+					} for fid, attachmentdata in enumerate(files)]
+		data = dict({
+			"payload_json": json.dumps({"content":"","nonce":None,"channel_id":channelid,"type":0,"sticker_ids":[],"attachments":attachments}),
+		},**{
+			"files[%d]"%fid: (attachmentdata["filename"], attachmentdata["handle"]) for fid, attachmentdata in enumerate(files)
+		})
+		encoder = MultipartEncoder(data)
+		monitor = MultipartEncoderMonitor(encoder, lambda x: progressCallback("update", monitor.bytes_read))
+		monitor.data_channelid = channelid
+		progressCallback("max", encoder.len)
+		return monitor
 	def send(self, channelid, message="", files=[]):
+		if type(channelid) == MultipartEncoderMonitor:
+			# special: received package from send_op_prep()
+			monitor = channelid
+			return discordhttp(requests.post, f"https://discord.com/api/v9/channels/{monitor.data_channelid}/messages", headers={
+				"authorization": self.token,
+				"Content-Type": monitor.content_type,
+			}, data=monitor)
 		# files = [
 		# 	{
 		# 		"filename": "xxx", "handle": open("xxx", "rb")
