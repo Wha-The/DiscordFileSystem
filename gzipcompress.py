@@ -47,13 +47,21 @@ class Buffer(object):
         return ret
     def flush(self):
         pass
+    def clear(self):
+        return self.__init__()
     def close(self):
         pass
 
 
 class GzipCompressReadStream(object):
-    def __init__(self, reader):
+    def __init__(self, reader, seeker=None):
         self.__input = reader
+        self.__seeker = seeker
+        if self.__seeker:
+            def fn_seek(self, pos):
+                seeker(seeker)
+                self.__buf.clear()
+            self.seek = fn_seek
         self.__buf = Buffer()
         self.__gzip = GzipFile(None, mode='wb', fileobj=self.__buf)
     def read(self, size=-1):
@@ -64,3 +72,4 @@ class GzipCompressReadStream(object):
                 break
             self.__gzip.write(s)
         return self.__buf.read(size)
+    def __len__(self): return 1#len(self.__buf)
