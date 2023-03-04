@@ -1,21 +1,3 @@
-"""
-Discord File System
-Copyright (C) 2022  NWhut
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""
-
 print("Loading...")
 import tornado.ioloop
 import tornado.web
@@ -31,14 +13,15 @@ import string
 import random
 import time
 import traceback
+import uuid
 import sys
 import signal
 import hashlib
 import rsa
 import mimetypes
 import base64
+import asyncio
 from cryptography.fernet import Fernet
-from hurry.filesize import size as toString_filesize
 
 if not os.path.isdir("temp"):
 	os.mkdir("temp")
@@ -62,7 +45,7 @@ from aes import AESCipher
 import discordfilesystem as filesystem
 
 
-Quote = "infinite exceptionally secure storage"
+Quote = ""
 
 def fernet_encrypt(data, key=COOKIE_SECRET):
 	if type(data) == str: data = data.encode()
@@ -99,6 +82,15 @@ del Templates_template
 NEW_CONNECTIONS_LISTENERS = []
 
 class BaseHandler(tornado.web.RequestHandler):
+	def write_error(self, status_code, **kwargs):
+		excp = kwargs['exc_info'][1]
+		tb   = kwargs['exc_info'][2]
+		stack = traceback.extract_tb(tb)
+		clean_stack = [i for i in stack if i[0][-6:] != 'gen.py' and i[0][-13:] != 'concurrent.py']
+		error_msg = '{}\n{}'.format(''.join(traceback.format_list(clean_stack)),excp)
+		print(error_msg)
+		self.set_status(status_code)
+		self.write(str(excp))
 	def prepare(self):
 		if self.request.remote_ip != ip and self.request.remote_ip not in open("confidential/ip_whitelist",'r').read().splitlines():
 			if NEW_CONNECTIONS_LISTENERS:
@@ -187,7 +179,7 @@ class FileSystemRenderHandler(BaseHandler):
 		self.render(Templates.filesystem_viewer, Quote=Quote)
 FileSystemClients = {}
 def getFileSystemHiddenFolders():
-	return {[o.strip() for o in i.split(":")][0]:[o.strip() for o in i.split(":")][1] for i in open("./FileSystem_HIDDEN_FOLDERS.settings",'r').readlines() if i.strip()}
+	return {[o.strip() for o in i.rsplit(":", 1)][0]:[o.strip() for o in i.rsplit(":", 1)][1] for i in open("./FileSystem_HIDDEN_FOLDERS.settings",'r').readlines() if i.strip()}
 
 def sha256(data):
 	return hashlib.sha256(data.encode()).hexdigest()
@@ -224,7 +216,7 @@ class FileSystemWebSocketHandler(tornado.websocket.WebSocketHandler, BaseHandler
 					newdir = ("" if currentdir=="/" else currentdir)+"/"+directory
 
 				if filesystem.isdir(self.get_database_session_from_user(), newdir):
-					password_correct = getFileSystemHiddenFolders().get(newdir)
+					password_correct = getFileSystemHiddenFolders().get(f"{self.get_database_session_from_user().drive_key}:{newdir}")
 					if password_correct and directory != "..":
 						shouldsendpasswordIncorrect = False
 						passwordIncorrect = password != password_correct
@@ -248,9 +240,10 @@ class FileSystemWebSocketHandler(tornado.websocket.WebSocketHandler, BaseHandler
 					{
 						"name":file,
 						"isfile":filesystem.isfile(self.get_database_session_from_user(), os.path.join(dirlisting,file)),
-						"protected":bool(getFileSystemHiddenFolders().get(cwd+file.replace("\\","/"))),
-						"size":toString_filesize(filesystem.get_size(self.get_database_session_from_user(), "./filesystem"+cwd+"/"+file.replace("\\","/"))),
-						"filesinside":(not bool(getFileSystemHiddenFolders().get(cwd+file.replace("\\","/"))) and filesystem.isdir(self.get_database_session_from_user(), os.path.join(dirlisting,file)) and filesystem.listdir(self.get_database_session_from_user(), os.path.join(dirlisting,file)) )
+						"protected":bool(getFileSystemHiddenFolders().get(f"{self.get_database_session_from_user().drive_key}:{cwd}"+file.replace("\\","/"))),
+						"size":filesystem.get_size(self.get_database_session_from_user(), "./filesystem"+cwd+"/"+file.replace("\\","/")),
+						"lastmodified": filesystem.get_last_modified(self.get_database_session_from_user(), "./filesystem"+cwd+"/"+file.replace("\\","/")),
+						#"filesinside":(not bool(getFileSystemHiddenFolders().get(f"{self.get_database_session_from_user().drive_key}:{cwd}"+file.replace("\\","/"))) and filesystem.isdir(self.get_database_session_from_user(), os.path.join(dirlisting,file)) and filesystem.listdir(self.get_database_session_from_user(), os.path.join(dirlisting,file)) )
 					}
 					for file in filesystem.listdir(self.get_database_session_from_user(), dirlisting) if not "'" in file
 					],
@@ -259,11 +252,24 @@ class FileSystemWebSocketHandler(tornado.websocket.WebSocketHandler, BaseHandler
 		elif action == "downloadFile":
 			file = data["file"]
 			cwd = FileSystemClients[self]["cwd"]
-			self.send_message(json.dumps({"action":action,"redirect":"/api/download?filename="+os.path.join(cwd,file).replace("\\","/")}))
-		elif action == "viewFile":
-			file = data["file"]
-			cwd = FileSystemClients[self]["cwd"]
-			self.send_message(json.dumps({"action":action,"redirect":"/api/view?filename="+os.path.join(cwd,file).replace("\\","/")}))
+			abspath = os.path.join(cwd, file).replace("\\","/")
+
+			accesskey = uuid.uuid4().hex
+			progresstrackid = uuid.uuid4().hex
+
+			GlobalProgressDict[progresstrackid] = [[], filesystem.Progression()]
+			FileDownloadAccessKeys[accesskey] = [abspath, progresstrackid]
+			
+			def cleanup():
+				time.sleep(60 * 60 * 60)
+				if FileDownloadAccessKeys.get(accesskey): FileDownloadAccessKeys.pop(accesskey)
+				if GlobalProgressDict.get(progresstrackid): GlobalProgressDict.pop(progresstrackid)
+			threading.Thread(target=cleanup).start()
+			print(f"Requested download link, access: {accesskey}, progress: {progresstrackid}")
+			fname = file
+			if filesystem.isdir(self.get_database_session_from_user(), abspath):
+				fname += ".zip"
+			self.send_message(json.dumps({"action":action, "filename": fname, "url":f"/api/download?accesskey={accesskey}", "progress":progresstrackid}))
 
 		elif action == "delFile":
 			file = data["file"]
@@ -275,7 +281,7 @@ class FileSystemWebSocketHandler(tornado.websocket.WebSocketHandler, BaseHandler
 				if filesystem.isfile(self.get_database_session_from_user(), fpath):
 					filesystem.remove(self.get_database_session_from_user(), fpath)
 				if filesystem.isdir(self.get_database_session_from_user(), fpath):
-					if not getFileSystemHiddenFolders().get(cwd+file):
+					if not getFileSystemHiddenFolders().get(f"{self.get_database_session_from_user().drive_key}:{fpath}"+file):
 						filesystem.remove(self.get_database_session_from_user(), fpath)
 			self.send_message(json.dumps({"action":action,"success":True}))
 		elif action == "renFile":
@@ -284,10 +290,11 @@ class FileSystemWebSocketHandler(tornado.websocket.WebSocketHandler, BaseHandler
 			cwd = FileSystemClients[self]["cwd"]
 			fpath = os.path.join("./filesystem"+cwd,file)
 			fpath2 = os.path.join("./filesystem"+cwd,file2)
-			if not "/" in file and not "/" in file2:
-				if not filesystem.exists(self.get_database_session_from_user(), fpath2):
-					if not getFileSystemHiddenFolders().get(cwd+file):
-						filesystem.rename(self.get_database_session_from_user(), fpath, fpath2)
+			#if not "/" in file and not "/" in file2:
+
+			if filesystem.exists(self.get_database_session_from_user(), fpath) and not filesystem.exists(self.get_database_session_from_user(), fpath2):
+				if not getFileSystemHiddenFolders().get(f"{self.get_database_session_from_user().drive_key}:{fpath}"+file):
+					filesystem.rename(self.get_database_session_from_user(), fpath, fpath2)
 			self.send_message(json.dumps({"action":action,"success":True}))
 		elif action == "newFolder":
 			cwd = FileSystemClients[self]["cwd"]
@@ -299,6 +306,8 @@ class FileSystemWebSocketHandler(tornado.websocket.WebSocketHandler, BaseHandler
 
 	def on_close(self):
 		del FileSystemClients[self]
+
+GlobalProgressDict = {}
 
 class FileSystemUploadHandler(BaseHandler):
 	def post(self):
@@ -313,60 +322,110 @@ class FileSystemUploadHandler(BaseHandler):
 		if not path or ".." in path:
 			return
 		print("Upload Queued: "+file["filename"])
-		threading.Thread(target=filesystem.write, args=(self.get_database_session_from_user(), os.path.join("./filesystem"+path,file["filename"]), file["body"], data.get("last_modified"))).start()
-		self.write(json.dumps({"success":True}))
+		progresstrackid = uuid.uuid4().hex
+		GlobalProgressDict[progresstrackid] = [[], filesystem.Progression()]
+		t = threading.Thread(target=filesystem.write, args=(self.get_database_session_from_user(), os.path.join("./filesystem"+path,file["filename"]), file["body"], int(data.get("last_modified"))), kwargs={"Progress": GlobalProgressDict[progresstrackid][1]})
+		t.start()
+		def thread_c():
+			t.join()
+			if GlobalProgressDict.get(progresstrackid):
+				for client in GlobalProgressDict[progresstrackid][0]:
+					io_loop.asyncio_loop.call_soon_threadsafe(lambda: client.send_message(json.dumps({"completed": True})))
+				del GlobalProgressDict[progresstrackid]
+		t2 = threading.Thread(target=thread_c)
+		t2.start()
+		self.write(json.dumps({"success":True, "progress": progresstrackid}))
 
+class FileProgressWebSocketHandler(tornado.websocket.WebSocketHandler, BaseHandler):
+	def on_open(self):
+		pass # nothing to process
+	def send_message(self, message):
+		return self.write_message(self.server_encrypt(message))
+	def on_message(self, message):
+		try:
+			message = json.loads(self.server_decrypt(message))
+		except Exception as e:
+			print("400 Bad Request: ")
+			traceback.print_exc()
+
+			self.send_message(json.dumps({"error":"400 Bad Request"}))
+			return
+		action = message.get("action")
+		data = message.get("data") or {}
+		if action == "ListenFileProgress":
+			progressid = data["progressid"]
+			if GlobalProgressDict.get(progressid):
+				GlobalProgressDict[progressid][0].append(self)
+				c = GlobalProgressDict[progressid][1].listen(lambda p: io_loop.asyncio_loop.call_soon_threadsafe(lambda: self.send_message(json.dumps({"progress": p}))))
+				
+				if hasattr(self, "_open_progress_listner"):
+					self._open_progress_listner[0].unlisten(self._open_progress_listner[1])
+					self._open_progress_listner[2].remove(self)
+					del self._open_progress_listner
+
+				self._open_progress_listner = (GlobalProgressDict[progressid][1], c, GlobalProgressDict[progressid][0])
+			else:
+				print("tried to listen to progress that doesn't exist? pid: "+progressid)
+	def on_close(self):
+		if hasattr(self, "_open_progress_listner"):
+			self._open_progress_listner[0].unlisten(self._open_progress_listner[1])
+			self._open_progress_listner[2].remove(self)
+			del self._open_progress_listner
+
+def get_writeflusher(_self):
+	class _construct():
+		def write(self, *args):
+			_self.write(*args)
+			io_loop.asyncio_loop.call_soon_threadsafe(_self.flush)
+	return _construct()
+
+FileDownloadAccessKeys = {}
 class FileSystemDownloadHandler(BaseHandler):
+	def complete_progress(self, progresstrackid):
+		if GlobalProgressDict.get(progresstrackid):
+			for client in GlobalProgressDict[progresstrackid][0]:
+				io_loop.asyncio_loop.call_soon_threadsafe(lambda: client.send_message(json.dumps({"completed": True})))
+			del GlobalProgressDict[progresstrackid]
 	async def get(self):
 		if not self.FileSystem_checkAuthenticated():
 			return
-
-		file_name = self.get_argument("filename","")
-		path = ("./filesystem"+file_name)
-		if not path:
-			self.write("Please provide a filename")
-			return
+		accesskey = self.get_argument("accesskey","")
+		if not FileDownloadAccessKeys.get(accesskey):
+			self.set_status(401)
+			return self.write("Access Key invalid/expired")
+		path = ("./filesystem"+FileDownloadAccessKeys[accesskey][0])
+		file_name = os.path.split(path)[1]
 		if ".." in path:
 			self.write("Illegal .. in filename")
 			return
 		if filesystem.isfile(self.get_database_session_from_user(), path):
+			self._auto_finish = False
 			self.set_header('Content-Type', 'application/octet-stream')
 			_, dwFileName = filesystem.pathsplit(file_name)
 			self.set_header('Content-Disposition', "attachment; filename="+dwFileName)
-			filesystem.download(self.get_database_session_from_user(), path, self, Progress=filesystem.Progression())
-			self.finish()
+			#self.set_header("Content-Length", filesystem.get_size(self.get_database_session_from_user(), path))
+			def thread_c():
+				filesystem.download(self.get_database_session_from_user(), path, get_writeflusher(self), Progress=GlobalProgressDict[FileDownloadAccessKeys[accesskey][1]][1])
+				self.complete_progress(FileDownloadAccessKeys[accesskey][1])
+				io_loop.asyncio_loop.call_soon_threadsafe(self.finish)
+			threading.Thread(target=thread_c).start()
 			return
 
-		if self.get_argument("password", None) != getFileSystemHiddenFolders().get(file_name):
+		if self.get_argument("password", None) != getFileSystemHiddenFolders().get(f"{self.get_database_session_from_user().drive_key}:"+file_name):
 			self.set_header('Content-Type', 'text/html')
 			self.write("Incorrect Password.")
 			self.finish()
 			return
+		self._auto_finish = False
 		self.set_header('Content-Type', 'application/octet-stream')
 		firstname = os.path.split(file_name)[-1]
 		self.set_header('Content-Disposition', 'attachment; filename=' + (firstname+".zip"))
-		await filesystem.create_folder_archive(self.get_database_session_from_user(), self, path, Progress=filesystem.Progression())
-
-		self.finish()
-class FileSystemViewHandler(BaseHandler):
-	def get(self):
-		if not self.FileSystem_checkAuthenticated():
-			return
-
-		file_name = self.get_argument("filename","")
-		path = ("./filesystem"+file_name)
-		if not path:
-			self.write("Please provide a filename")
-			return
-		if ".." in path:
-			self.write("Illegal .. in filename")
-			return
-		if filesystem.isfile(self.get_database_session_from_user(), path):
-			self.set_header('Content-Type', mimetypes.guess_type(path)[0] or "")
-			_, dwFileName = filesystem.pathsplit(file_name)
-			filesystem.download(self.get_database_session_from_user(), path, self, Progress=filesystem.Progression())
+		async def thread_c():
+			await filesystem.create_folder_archive(self.get_database_session_from_user(), get_writeflusher(self), path, Progress=GlobalProgressDict[FileDownloadAccessKeys[accesskey][1]][1])
+			self.complete_progress(FileDownloadAccessKeys[accesskey][1])
 			self.finish()
-			return
+		threading.Thread(target=asyncio.run, args=(thread_c(),)).start()
+
 class FileSystemLoginHandler(BaseHandler):
 	def get(self):
 		if self.FileSystem_checkAuthenticated(redirect=False): return self.redirect("/filesystem/")
@@ -524,12 +583,12 @@ def make_app():
 		(r"/resource",ResourcesHandler),
 		(r"/favicon.ico", FaviconHandler),
 		(r"/api/download",FileSystemDownloadHandler),
-		(r"/api/view", FileSystemViewHandler),
 		(r"/api/fetch_local_drives", GetDrivesHandler),
 		(r"/api/upload", FileSystemUploadHandler),
 		(r"/api/get_cloudfile_driveprotocol_help", GetCloudFileDriveProtocolHelp),
 
 		(r"/api/websocket", FileSystemWebSocketHandler),
+		(r"/api/file_progress_websocket", FileProgressWebSocketHandler),
 		(r"/api/listen_for_new_devices_websocket", ListenForNewDevicesWebSocketHandler),
 		(r"/api/accept_ip", AcceptIPAddressHandler),
 		(r"/info_websocket",InfoWebSocketHandler),
@@ -571,4 +630,7 @@ if __name__ == "__main__":
 	print("Visit http://%s:%d/"%(ip,PORT))
 
 	tornado.ioloop.PeriodicCallback(app.try_exit, 1000).start()
+	tornado.ioloop.IOLoop.configure("tornado.platform.asyncio.AsyncIOLoop")
+	io_loop = tornado.ioloop.IOLoop.current()
+	asyncio.set_event_loop(io_loop.asyncio_loop)
 	tornado.ioloop.IOLoop.instance().start()

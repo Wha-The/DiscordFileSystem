@@ -1,25 +1,14 @@
-<!---
-Discord File System
-Copyright (C) 2022  NWhut
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
---->
-
 <head>
 	<title>Secure File System - {{Quote}}</title>
 	<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
 	<script src="/src/srcs"></script>
+	<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" integrity="sha384-rbsA2VBKQhggwzxH7pPCaAqO46MgnOM80zW1RWuH61DGLwZJEdK2Kadq2F9CUG65" crossorigin="anonymous">
+	<link
+      rel="stylesheet"
+      href="https://maxcdn.bootstrapcdn.com/font-awesome/4.4.0/css/font-awesome.min.css"
+      lazyload
+    />
+
 	<style>
 		.noSelect {
 			 -moz-user-select: -moz-none;
@@ -78,39 +67,188 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 		#actionbar{
 			border-radius: 3px;
-			background-color: aliceblue;
 			z-index: 2;
 		}
-		#actionbar button {
-			height: 30px;
-			width: 100px;
-			font-size: 15px;
+		.selected {
+			background-color: #0059d1;
+			color: white;
 		}
+		/*body {
+			background-color: #212529;
+			font-family: system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue","Noto Sans","Liberation Sans",Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol","Noto Color Emoji";
+			font-weight: 400;
+		}
+		h1, h2, h3, h4, h5, h6 {
+		    margin-top: 0;
+		    margin-bottom: 0.5rem;
+		    font-weight: 500;
+		    line-height: 1.2;
+		    color: #fff;
+		}*/
 	</style>
+	<style>
+		.fjs-container {
+		  background-color: white;
+		  border: solid 1px lightgray;
+		  display: flex;
+		  font-size: .9em;
+		  min-height: 400px;
+		  overflow: auto;
+		}
+
+		.fjs-container:focus {
+		  outline:none;
+		}
+
+		.fjs-col {
+		  border-right: solid 1px lightgray;
+		  max-height: 600px;
+		  min-height: inherit;
+		  min-width: 200px;
+		  overflow-y: auto;
+		}
+
+		.fjs-item a {
+		  align-items: flex-end;
+		  color: black;
+		  display: flex;
+		  justify-content: space-between;
+		  padding: 5px;
+		  text-decoration: none;
+		  cursor:pointer;
+		}
+
+		.fjs-item a:focus {
+		  outline:none;
+		}
+
+		.fjs-item a span {
+		  overflow: hidden;
+		  text-overflow: ellipsis;
+		  white-space: nowrap;
+		}
+
+		.fjs-item a span i {
+		  padding-right: 5px;
+		}
+
+		.fjs-active a {
+		  background-color: #DEDEDE;
+		}
+
+		.fjs-col:nth-last-child(2) .fjs-active a,
+		.fjs-col:last-child .fjs-active a {
+		  background-color: dodgerblue;
+		  color: white;
+		}
+
+		.fjs-list {
+		  list-style: none;
+		  margin: 0;
+		  padding: 0;
+		}
+
+		.fjs-item-content {
+		  overflow: hidden;
+		  text-overflow: ellipsis;
+		  white-space: nowrap;
+		}
+
+		.fa-folder {
+		  color: #90E4FF;
+		}
+
+		.fa-file-o {
+		  color: #A7A7A7;
+		}
+
+		.fa-external-link {
+		  color: #629EFF;
+		  font-size: smaller;
+		}
+
+		.fa-caret-right {
+		  color: gray;
+		  padding: 0 0 0 .5em;
+		}
+
+		.fjs-col:nth-last-child(2) .fjs-active a .fa-caret-right,
+		.fjs-col:last-child .fjs-active a .fa-caret-right {
+		  color: white;
+		}
+
+		.leaf-col {
+		  align-items: center;
+		  border-right: 0;
+		  display: flex;
+		  flex: 2;
+		  justify-content: center;
+		  padding: 0 1.5em;
+		}
+
+		.leaf-row {
+		  display: flex;
+		  flex-direction: column;
+		  font-size: 1.3em;
+		  text-align: center;
+		}
+
+		.leaf-row .fa {
+		  color: #A7A7A7;
+		  font-size: 4em;
+		  margin: 20px 0;
+		}
+
+		.leaf-row .fa-refresh {
+		  font-size: 2em;
+		}
+
+		.leaf-col .meta {
+		  font-size: .7em;
+		}
+
+		.leaf-col .meta strong {
+		  color: #C1C1C1;
+		  font-weight: normal;
+		}
+
+		.leaf-col .meta:first-of-type {
+		  margin-top: 1.5em;
+		}
+		body {
+			font-family: system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue","Noto Sans","Liberation Sans",Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol","Noto Color Emoji";
+		}
+		.btn {
+			border-radius: 0;
+		}
+		.fileUploadBars {
+    	transition: height 0.15s ease-out;
+		}
+</style>
 </head>
 <body>
 	<h1>Secure File System &ndash; {{Quote}}</h1><hr>
 	<p id="errmsg" style="color:red;"></p>
-	<h1><b id="drive"></b><b id="cwd"></b></h1>
+	<h1 style="display:flex"><b id="drive"></b><b id="cwd"></b></h1>
 	<hr>
-	<div id="actionbar">
-		<button id="actionbar_refresh" disabled>Refresh</button>
-		<button id="actionbar_cd" disabled>CD</button>
-		<button id="actionbar_download" disabled>Download</button>
-		<button id="actionbar_edit" disabled>Quick Open</button>
-		<button id="actionbar_upload" disabled>Upload</button>
-		<button id="actionbar_newFolder" disabled>New Folder</button>
-		<button id="actionbar_rename" disabled>Rename</button>
-		<button id="actionbar_delete" disabled>Delete</button>
-
-
+	<div id="actionbar" class="btn-group">
+		<button class="btn btn-secondary btn-lg" id="actionbar_refresh" disabled>Refresh</button>
+		<button class="btn btn-secondary btn-lg" id="actionbar_cd" disabled>CD</button>
+		<button class="btn btn-secondary btn-lg" id="actionbar_download" disabled>Download</button>
+		<button class="btn btn-secondary btn-lg" id="actionbar_edit" disabled>Quick Open</button>
+		<button class="btn btn-secondary btn-lg" id="actionbar_upload" disabled>Upload</button>
+		<button class="btn btn-secondary btn-lg" id="actionbar_newFolder" disabled>New Folder</button>
+		<button class="btn btn-secondary btn-lg" id="actionbar_rename" disabled>Rename</button>
+		<button class="btn btn-secondary btn-lg" id="actionbar_delete" disabled>Delete</button>
 	</div>
-	<div id="files">
+	<div id="files" class="fjs-container noselect">
+		<div class="fjs-col">
+			<ul class="fjs-list" id="files-list">
 
-
-
-
+			</ul>
+		</div>
 	</div>
+	<div id="fileUploadBars"></div>
 	<hr>
 	<br><br><br>
 	<p>Current status: <b id="status"></b></p>
@@ -120,7 +258,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 	<div id="settings">
 		<h1>Settings</h1>
 		<label><input type="checkbox" id="settings_autoconnect" onchange="save_settings()"> Automacticly connect</label><br>
-		<label><input type="checkbox" id="settings_temporarysession" onchange="save_settings()" checked> Temporary Session</label>
 
 	</div>
 	<hr>	 
@@ -131,7 +268,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 	<div id="overlay">
 	  <div id="overlay_text">Drop files to upload to the CWD</div>
 	</div>
-
 	<script>
 		JQueryNotLoadedHelp = "Please refresh your page or contact the server owner"
 		$ = window.$||alert("JQuery was not properly loaded! "+JQueryNotLoadedHelp)
@@ -139,6 +275,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 		expectedstatus="disconnected"
 		function disconnect(){
 			expectedstatus = "disconnected"
+			document.getElementById("status").innerHTML = "Disconnected"
 			if (ws){
 				ws.close()
 				ws = null
@@ -150,7 +287,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 		SAVED_CWD = "/"
 		Settings = [
 			document.getElementById("settings_autoconnect"),
-			document.getElementById("settings_temporarysession"),
 		]
 		CURRENTSETTINGS = {}
 		function save_settings(){
@@ -184,40 +320,53 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 			if(settings["settings_autoconnect"]){
 				connect()
 			}
-			window.addEventListener("beforeunload", function(e){
-				var settings = load_settings()
-				if((settings["settings_temporarysession"] == undefined)||(settings["settings_temporarysession"] == true)){
-					CookieManager.setCookie("FileSystem_SessionInfo", "")
-				}
-			}, false);
 		})
+		function get_fname_icon_class(filename, isfolder){
+			var dotslips = filename.split(".")
+			var ext = !isfolder&&(dotslips[dotslips.length - 1]||"unknown")||"folder"
+			var iconcode = "fa fa-file-o"
+			var icons = {
+				"folder":"fa fa-folder",
+				"txt":"fa fa-file-text-o",
+				"docx":"fa fa-file-word-o",
+				"pdf":"fa fa-file-pdf-o",
+				"pptx": "fa fa-file-powerpoint-o",
+
+				"py": "fa fa-file-code-o",
+				"html": "fa fa-file-code-o",
+				"js": "fa fa-file-code-o",
+				"css": "fa fa-file-code-o",
+
+				"mp4":"fa fa-file-video-o",
+				"mov":"fa fa-file-video-o",
+
+				"png":"fa fa-file-image-o",
+				"jpg":"fa fa-file-image-o",
+				"jpeg":"fa fa-file-image-o",
+				"gif":"fa fa-file-image-o",
+
+				"zip": "fa fa-file-archive-o",
+			}
+			if (icons[ext.toLowerCase()]){
+				iconcode = icons[ext.toLowerCase()]
+			}
+			return iconcode
+		}
 		function updateFilesList(files, drive, cwd){
 			if(cwd!="/")files.unshift({"name":"..","isfile":false})
 			document.getElementById("cwd").innerHTML = cwd
 			document.getElementById("drive").innerHTML = drive+":"
 			window.history.pushState("", "", '/filesystem'+cwd);
 			SAVED_CWD = cwd
-			div = document.getElementById("files")
+			div = document.getElementById("files-list")
 			fileListData = ""
 			for (i=0;i<files.length;i++){
-				current = files[i]
-				currentAdd = ""
-				dotslips = current.name.split(".")
-				ext = current.isfile&&(dotslips[dotslips.length - 1]||"unknown")||"folder"
-				extcode = "["+ext+"]"
-				colors = {
-					"folder":"orange",
-					"txt":"blue",
-					"mp4":"gray",
-					"mov":"gray",
-					"png":"lightblue",
-					"jpg":"lightblue"
-				}
-				if (colors[ext]){
-					extcode = "<font color='"+colors[ext]+"'>["+ext+"]</font>"
-				}
+				var current = files[i]
+				var currentAdd = ""
+				var iconcode = get_fname_icon_class(current.name, !current.isfile)
+				
 				if (current.protected){
-					extcode = "<font color='red'>["+ext+"*]</font>"
+					iconcode = "fa fa-lock"
 				}
 				allfilestring = []
 				currentfileindex = 0
@@ -235,13 +384,23 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 						currentfileindex = currentfileindex + 1
 					})
 				}
-				currentAdd = "<p isfile='"+((current.isfile&&2||1)-1)+"' filename='"+current.name+"' ondblclick='doubleclick(event,this)' onclick='select(\""+current.name+"\")' style='cursor:pointer' id='file_"+current.name+"' class='noSelect'>"+extcode+" "+current.name+(systemFilenames.includes(current.name)&&"<font class='left_25'>System Path</font>"||
-				`<font class="left_25">Size: `+current.size+`</font>
-				`+
-				(current.protected&&"<font class='left_50'>Hidden</font>"||(current.filesinside&&current.filesinside.length>0 && `<font class="left_50">Files: [`+current.filesinside.length+`] `+allfilestring.join("<b>, </b>")+"</font>"||"<font class='left_50'></font>"))
-				+"</p>"	
+				// currentAdd = "<li isfile='"+((current.isfile&&2||1)-1)+"' filename='"+current.name+"' class='noSelect'>"+extcode+" <font id='filename'>"+current.name+"</font>"+(systemFilenames.includes(current.name)&&"<font class='left_25'>System Path</font>"||
+				// `<font class="left_25">Size: `+current.size+`</font>
+				// `+
+				// (current.protected&&"<font class='left_50'>Hidden</font>"||(current.filesinside&&current.filesinside.length>0 && `<font class="left_50">Files: [`+current.filesinside.length+`] `+allfilestring.join("<b>, </b>")+"</font>"||"<font class='left_50'></font>"))
+				// +"</p>"	
 
-				)
+				// )
+				currentAdd = `<li class='fjs-item ${!current.isfile && "fjs-has-children" || ""}' data-isfile='${((current.isfile&&2||1)-1)}' data-filename='${current.name}' data-last-modified='${current.lastmodified}' data-fsize='${current.size}' id='file_${current.name}'>
+					<a tabindex="-1" ondblclick='doubleclick(event, this.parentElement)' onclick='select("${current.name}")'>
+						<span>
+							<i class="${iconcode}"></i>
+							${current.name}
+						</span>
+						${!systemFilenames.includes(current.name) && !current.isfile && "<i class='fa fa-caret-right'></i>" ||""}
+						${systemFilenames.includes(current.name) && "<i class='fa fa-caret-left'></i>" ||""}
+					</a>
+				</li>`
 
 				fileListData = fileListData +"\n"+currentAdd
 			}
@@ -257,6 +416,38 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 				  }
 				 },25)
 			});
+		}
+	function gobacktopath(p){
+		console.log("GOING BACK TO PATH: ",p)
+		let inner = function(fcall){
+			setTimeout(() => {
+				if (SAVED_CWD != p)return inner(fcall)
+				return fcall()
+			}, 200)
+			cd("..")
+		}
+		return new Promise((resolve, reject) => {
+			inner(resolve)
+		})
+	}
+	async function gotopath(path){
+			if(typeof path == "string") path = path.split(/\//g)
+			var cwd_path = SAVED_CWD.split(/\//g)
+			var goBackToPath = [""]
+			cwd_path.forEach((seg, index) => {
+				if(path[index] != seg){
+					goBackToPath = path.slice(0, index-1)
+				}
+			})
+			goBackToPath = "/" + goBackToPath.join("/")
+			await gobacktopath(goBackToPath)
+			path.forEach(function(segment){
+				
+				if(segment){
+					console.log(segment)
+					cd(segment)
+				}
+			})
 		}
 		REFRESH_AFTERFUNC = null
 		function _connect(reconnection){
@@ -274,16 +465,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 				return
 			}
 
-
 			wss.onopen = function() {
 				document.getElementById("status").innerHTML = "Connected"
 				expectedstatus = "live"
-				location.pathname.split(/\//g).slice(2).forEach(function(segment){
-					if(segment){
-						cd(segment)
-					}
-				})
-				cd(".")
+				gotopath(decodeURIComponent(location.pathname).split(/\//g).slice(2))
 			};
 			var sounds = {
 				click:new Audio('/resource?filename=click.mp3'),
@@ -328,7 +513,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 							document.getElementById('overlay').style.display = 'none';
 							ws.send(JSON.stringify({"action":"getCDContents"}))
 						}
-
 					}
 					if (previousAction == "getCDContents"){
 
@@ -350,10 +534,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 						SELECTED = null
 						update()
 					}
-					if (previousAction == "uploadFile"){
-						if (response.afterselect){
-							refreshDirectory(response.afterselect)
-						}
+					if (previousAction == "downloadFile"){
+						console.log(response.progress)
+						monitorFileProgress(response.filename, response.progress, onconnect=() => {
+							var iframe = document.createElement("iframe")
+							iframe.src = response.url
+							iframe.style.display = "none"
+							document.body.appendChild(iframe)
+						})
 					}
 					if (previousAction == "newFolder"){
 						if (response.afterselect){
@@ -368,7 +556,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 			}
 
 			wss.onclose = function(){
-				console.log("closed")
 				document.getElementById("status").innerHTML = "Disconnected"
 				if (expectedstatus!="disconnected"){
 					connect(true)
@@ -435,7 +622,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 		function rename(file){
 			elem = document.getElementById("file_"+file)
 			origInnerHtml = elem.innerHTML
-			elem.innerHTML = "<input type='text' id='rename_"+file+"' value='"+elem.getAttribute("filename")+"' placeholder='new name' style='width:100%;max-width:100%'>"
+			elem.innerHTML = "<input type='text' id='rename_"+file+"' value='"+elem.getAttribute("data-filename")+"' placeholder='new name' style='width:100%;max-width:100%'>"
 			renameelem = document.getElementById("rename_"+file)
 			renameelem.select()
 			renameelem.addEventListener("keyup", function(event) {
@@ -449,6 +636,33 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 							ws.send(JSON.stringify({action:"renFile",data:{from:file,to:after}}))
 							refreshDirectory(after)
 
+						}
+						if (event.keyCode === 27){ // esc
+							elem.innerHTML = origInnerHtml
+						}
+					},25)
+				});
+		}
+		function editAddressBar(){
+			if(document.getElementById("edit_cwd"))return
+			elem = document.getElementById("cwd")
+			origInnerHtml = elem.innerHTML
+			elem.innerHTML = "<input type='text' id='edit_cwd' value='"+elem.innerHTML+"' placeholder='new name' style='flex-grow:1; font-size:1em;'>"
+
+			renameelem = document.getElementById("edit_cwd")
+			renameelem.select()
+			renameelem.onblur = () => {
+				elem.innerHTML = origInnerHtml
+			}
+			renameelem.addEventListener("keyup", function(event) {
+				event.preventDefault();
+					// Number 13 is the "Enter" key on the keyboard
+					setTimeout(function(){
+						if (event.keyCode === 13) {
+							// Cancel the default action, if needed
+							after = renameelem.value
+							renameelem.onblur = () => {}
+							gotopath(after)
 						}
 						if (event.keyCode === 27){ // esc
 							elem.innerHTML = origInnerHtml
@@ -482,9 +696,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 			var retrievedData = null
 			ws.onmessage = function(data){
 				response = JSON.parse(data.data)
-				if (response.redirect){
+				if (response.url){
 					ws.onmessage = OLDWSONMESSAGEHANDLER
-					finish(response.redirect)
+					monitorFileProgress(response.filename, response.progress)
+					finish(response.url)
 				}
 			}
 			ws.send(JSON.stringify({"action": (view ? "view" : "download")+"File","data":{"file":fname}}))
@@ -510,10 +725,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 		}
 		var edit_callbacks = {
 			".txt": edittxt,
+			
 			".mp4": editmp4,
 			".mov": editmp4,
+
 			".png": editpng,
-			".jpg": editpng
+			".jpg": editpng,
+			".jpeg": editpng,
+			".gif": editpng,
 		}
 		function edit(evt){
 			if(evt.ctrlKey){
@@ -529,7 +748,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 		function editpng(){
 				
 				getFileDownloadLink(SELECTED, function(url){
-					popup = window.open("","Image Viewer","width=600,height=500")
+					popup = window.open(" ","Image Viewer","width=600,height=500,location=no")
 					writedata = `
 	<title>Image Viewer</title>
 	<img src="`+url+`" width=100% height=100% style="object-fit: cover;">
@@ -542,7 +761,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 		function editmp4(){
 			
 			getFileDownloadLink(SELECTED, function(url){
-				popup = window.open("","Video Player","width=1000,height=500")
+				popup = window.open(" ","Video Player","width=1000,height=500,location=no")
 				writedata = `
 <title>Video Player</title>
 <video controls width="100%" height="100%" id="player">
@@ -566,10 +785,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 		}
 
 		function edittxt(){
-
 			var currentFName = SELECTED
 			getFileContents(SELECTED,function(data){
-				popup = window.open("","Editor","width=500,height=500")
+				popup = window.open("","Editor","width=500,height=500,location=no")
 				writedata = `
 <title>Editor</title>
 <style>
@@ -690,24 +908,57 @@ function showsnack(text,timeout) {
 			evt.preventDefault()
 			if (!pingws())return
 			recentdoubleclick = true
-			fname = elem.getAttribute("filename")
-			isfile = elem.getAttribute("isfile")=="1"
+			fname = elem.getAttribute("data-filename")
+			isfile = elem.getAttribute("data-isfile")=="1"
 			if (isfile){
-				download(fname)
+				edit(fname)
 			}
 			else{
 				cd(fname)
 			}
+		}
+		(()=>{
+			var doeditaddrbar = function(evt){
+				evt.preventDefault()
+				if(!pingws())return
+				editAddressBar()
+			}
+			document.getElementById("cwd").onclick = doeditaddrbar
+			document.getElementById("drive").onclick = doeditaddrbar
+		})()
+		
+		function createLeafRow(fname, fsize, iconhtml, lastModified){
+			var div = document.createElement("div")
+			/* <div class="fjs-col leaf-col"><div class="leaf-row"><i class="fa fa-file-o"></i>.codeclimate.yml<div class="meta"><strong>Size: </strong>56 KB</div><div class="meta"><strong>Modified: </strong>02/21/2015 at 10:04am</div></div></div> */
+			div.classList = "fjs-col leaf-col"
+			div.id = "leafrow"
+			var timeString = "???"
+			if (lastModified != 0){
+				var lastModifiedDate = new Date(lastModified * 1000)
+				var timeString = `${String(lastModifiedDate.getDate()).padStart(2, '0')}/${String(lastModifiedDate.getMonth()).padStart(2, '0')}/${String(1900 + lastModifiedDate.getYear()).padStart(4, '0')} at ${String(lastModifiedDate.getHours() % 12).padStart(2, '0')}:${String(lastModifiedDate.getMinutes()).padStart(2, '0')}${lastModifiedDate.getHours() >= 12 ? 'pm' : 'am'}`
+			}
 
-			
+			div.innerHTML = `<div class="leaf-row">
+				${iconhtml}
+				${fname}
+				<div class="meta">
+					<strong>Size: </strong>${humanFileSize(fsize, si=true)}
+				</div>
+				<div class="meta">
+					<strong>Modified: </strong>${timeString}
+				</div>
+			</div>`
+			document.getElementById("files").appendChild(div)
+			return div
 		}
 		function update(){
 			if (!pingws())return
-			elems = document.getElementById("files").children
+			elems = document.getElementById("files-list").children
 			for (i=0;i<elems.length;i++){
 				elem = elems[i]
-				elem.style.backgroundColor = "white"
-				elem.style.color = "black"
+				if(elem.classList.contains("fjs-active")){
+					elem.classList.remove("fjs-active")
+				}
 			}
 			actionbar_refersh = true
 			actionbar_cd = false
@@ -717,12 +968,13 @@ function showsnack(text,timeout) {
 			actionbar_newFolder = true
 			actionbar_rename = false
 			actionbar_delete = false
-
+			var leafRow = document.getElementById("leafrow")
+			if(leafRow) leafRow.parentElement.removeChild(leafRow)
 			if (SELECTED){
 				elem = document.getElementById("file_"+SELECTED)
-				isfile = elem.getAttribute("isfile")=="1"
-				elem.style.backgroundColor = "black"
-				elem.style.color = "white"
+				leafRow = createLeafRow(SELECTED, elem.getAttribute("data-fsize"), elem.querySelector("i").outerHTML, elem.getAttribute("data-last-modified"))
+				isfile = elem.getAttribute("data-isfile")=="1"
+				elem.classList.add("fjs-active")
 				actionbar_download = true
 				actionbar_delete = true
 				actionbar_rename = true
@@ -772,7 +1024,7 @@ function showsnack(text,timeout) {
 		ws.send(JSON.stringify({"action":"newFolder"}))
 	}
 	document.getElementById("actionbar_delete").onclick = function(){
-		if (confirm("Are you sure you want to delete "+document.getElementById("file_"+SELECTED).innerText+"?")){
+		if (confirm(`Are you sure you want to delete "${document.getElementById("file_"+SELECTED).getAttribute("data-filename")}"?`)){
 			ws.send(JSON.stringify({action:"delFile",data:{file:SELECTED}}))
 		}
 	}
@@ -780,9 +1032,44 @@ function showsnack(text,timeout) {
 	document.getElementById("actionbar_rename").onclick = function(){
 		rename(SELECTED)
 	}
+	// upload monitoring
+	function monitorFileProgress(fname, pid, onconnect=undefined){
+		var div = document.createElement("div")
+		div.innerHTML = `<li class="fjs-item"><i class="${get_fname_icon_class(fname)}"></i>${fname}</li><div class="progress"><div class="progress-bar progress-bar-striped progress-bar-animated bg-primary" role="progressbar"></div></div>`
+		div.className = "fjs-list"
+		div.children[1].children[0].innerHTML = "0%"
+		div.children[1].children[0].style.width = "0%"
+		document.getElementById("fileUploadBars").appendChild(div)
+
+		// pid: progress id
+		var wss = new WebSocket("ws"+(window.location.protocol=="https:"&&"s"||"")+"://"+location.host+"/api/file_progress_websocket");
+		
+		// wrappers
+		var ws = {}
+		wss.onmessage = (d) => ws.onmessage(window.client_decrypt(d.data)) // wrapper
+		ws.send = (data) => wss.send(window.client_encrypt(data)) // wrapper
+
+		wss.onopen = () => {
+			ws.send(JSON.stringify({action:"ListenFileProgress", data: {progressid: pid}}))
+			if(onconnect)onconnect()
+		}
+		ws.onmessage = (data) => {
+			data = JSON.parse(data)
+			if(data.progress){
+				div.children[1].children[0].innerHTML = Math.round((data.progress*100))+"%"
+				div.children[1].children[0].style.width = (data.progress*100)+"%"
+			}
+			if (data.completed){
+				div.children[1].children[0].classList.remove("bg-primary")
+				div.children[1].children[0].classList.add("bg-success")
+				wss.close()
+				refreshDirectory(fname)
+				setTimeout(() => div.parentElement.removeChild(div), 5000)
+			}
+		}
 
 
-
+	}
 	// uploading
 	fileinput = document.getElementById("file-input");
 	fileinput.addEventListener("change", handleFiles, false);
@@ -801,11 +1088,9 @@ function showsnack(text,timeout) {
 		 
 	}
 	function handleFiles(files) {
-		console.log(files)
 		finishedUploading = []
 		async function uploadSingleFile(file,i, attemptNumber){
 			attemptNumber=attemptNumber||0
-			console.log(file)
 			if(file.size >= (10485760000)){
 				alert("Unable to upload "+file.name+":\nFile exceeds 10GB.")
 			   	finishedUploading[i] = true
@@ -819,6 +1104,11 @@ function showsnack(text,timeout) {
 
 			try {
 			   fetch('/api/upload', {method: "POST", body: formData}).then(function(r){
+			   	r.json().then((data) => {
+			   		if(data.success && data.progress){
+			   			monitorFileProgress(file.name, data.progress)
+			   		}
+			   	})
 			   	console.log('HTTP response code:',r.status); 
 			   	finishedUploading[i] = true
 			   }); 
@@ -841,10 +1131,9 @@ function showsnack(text,timeout) {
 			uploadSingleFile(file,i)
 		}
 		i = setInterval(function(){
-			if(finishedUploading.every(function(item){return item==true})){
+			if(finishedUploading.every((item) => item)){
 				console.log("done")
 				clearInterval(i)
-				refreshDirectory()
 			}
 		},100)
 	}
@@ -868,7 +1157,7 @@ function showsnack(text,timeout) {
 		if (dt.types && (dt.types.indexOf ? dt.types.indexOf('Files') != -1 : dt.types.contains('Files'))) {
 			dropbox.classList.add("specialborders")
 			document.getElementById("overlay").style.display = "block";
-			document.getElementById("overlay_text").innerHTML = pingws(true)?"Drop files to upload to the CWD":"Please connect to the server first"
+			document.getElementById("overlay_text").innerHTML = pingws(true)?"Drop files to upload":"Please connect to the server first"
 			window.clearTimeout(dragTimer);
 		}
 	});
@@ -882,14 +1171,13 @@ function showsnack(text,timeout) {
 	$(dropbox).on("drop",drop)
 
 
-var actionbar = document.getElementById("actionbar");
-
-var sticky = actionbar.offsetTop;
-window.onscroll = function() {
- window.pageYOffset > sticky ? actionbar.classList.add("sticky") : actionbar.classList.remove("sticky")
-}
-
-
+document.body.addEventListener("click", function(e) {
+    var elem = e.target;
+    if (Array.from(document.querySelectorAll(".fjs-col")).includes(elem)){
+    	SELECTED = null
+		update()
+    }
+});
 
 	</script>
 </body>

@@ -1,22 +1,5 @@
-"""
-Discord File System
-Copyright (C) 2022  NWhut
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""
-
 import os
+os.environ["USERPROFILE"] = os.environ.get("USERPROFILE") or os.environ["HOME"]
 import sys
 import base64
 import json
@@ -71,6 +54,9 @@ class Progression():
 	def listen(self, callback):
 		self.listeners.append(callback)
 		self.dispatchUpdate(callback)
+		return callback
+	def unlisten(self, callback):
+		return self.listeners.remove(callback)
 	def updateListeners(self):
 		for listener in self.listeners:
 			self.dispatchUpdate(listener)
@@ -159,6 +145,20 @@ class LocalDrive():
 		if os.path.abspath(os.path.split(self.drive_file)[0]) == os.path.abspath(os.path.join(workingcwd, "confidential/drives/")):
 			return os.path.splitext(os.path.split(self.drive_file)[1])[0]
 		return "file:"+self.drive_file.replace(os.environ["USERPROFILE"], r"%user%")
+
+_RamDiskSlots = {}
+class RamDisk():
+	def __init__(self, slot):
+		self.slot = slot.removeprefix("ramdisk:").strip()
+	def exists(self):
+		return self.slot in _RamDiskSlots
+	def read(self):
+		return _RamDiskSlots[self.slot]
+	def write(self, data):
+		_RamDiskSlots[self.slot] = data
+	def export_drive_key(self):
+		return f"ramdisk:{self.slot}"
+
 class Session():
 	valid = False
 	def __init__(self, key=None, drive="main"):
@@ -191,6 +191,8 @@ class Session():
 		if self.drive_key.startswith("cloud:"):
 			# cloud drive
 			self.drive = CloudDrive(self.drive_key)
+		elif self.drive_key.startswith("ramdisk:"):
+			self.drive = RamDisk(self.drive_key)
 		else:
 			self.drive = LocalDrive(self.drive_key.replace(os.environ["USERPROFILE"], r"%user%"))
 		self.export_drive_key = self.drive.export_drive_key
@@ -210,13 +212,16 @@ def create_drive(Session):
 GLOBAL_INDEX_LOCK = threading.Lock()
 
 FILE_UPLOAD_PROCESS_LOCK = threading.Lock()
-def process_file_upload(uploadfilename, fpath, done, args):
+def process_file_upload(uploadfilename, fhandle, done, args, progressCallback=None):
+
+	m_pkg = user.send_op_prep(988130151495774208, files=[{
+		"filename": uploadfilename,
+		"handle": fhandle
+	}], progressCallback=progressCallback)
+
 	FILE_UPLOAD_PROCESS_LOCK.acquire()
 	print("[SENDING FILE] "+uploadfilename)
-	response = user.send(988130151495774208, files=[{
-		"filename": uploadfilename,
-		"handle": open(fpath, "rb")
-	}])
+	response = user.send(m_pkg)
 	threading.Thread(target=lambda: not time.sleep(1) and FILE_UPLOAD_PROCESS_LOCK.release()).start()
 	try:
 		data = response.json()
@@ -225,18 +230,21 @@ def process_file_upload(uploadfilename, fpath, done, args):
 			data = {"retry_after": 5}
 			print("Discord Server Overloaded :(")
 	if data.get("retry_after"):
+		print("Got 'Retry-After'")
 		time.sleep(data["retry_after"] * 1.5)
-		return process_file_upload(uploadfilename, fpath, done, args)
+		if hasattr(fhandle, "seek"): fhandle.seek(0)
+		return process_file_upload(uploadfilename, fhandle, done, args, progressCallback=progressCallback)
 	if not data.get("attachments"):
 		print(data)
 	print("Upload Complete: "+uploadfilename)
 	done(data["attachments"][0]["url"], *args)
-def upload_file(uploadfilename, fpath, done=lambda:None, args=()):
-	threading.Thread(target=process_file_upload, args=(uploadfilename, fpath, done, args)).start()
+def upload_file(uploadfilename, fhandle, done=lambda:None, args=(), progressCallback=None):
+	t = threading.Thread(target=process_file_upload, args=(uploadfilename, fhandle, done, args), kwargs={"progressCallback":progressCallback})
+	t.start()
+	return t
 
 class PathNotFoundError(Exception): pass
 class FileSystemKeyError(Exception): pass
-class ChecksumMismatch(Exception): pass
 
 START_PADDING, END_PADDING = b"\xdd\xb3\xa9c\xbc\x02,\r\xc5!\x14Y\xaa-`f", b"\x8a\x14\x03`t\xf6\xb7\xb4\xa6\n\xe6\xcb\x02\xe3r$"
 def get_index_metadata(Session):
@@ -297,8 +305,24 @@ def pathsplit(segments):
 
 
 def normalizePath(path):
-	path = path.replace("\\", "/").replace("./", "").replace("filesystem/", "", 1)
-	return path
+	path = path.replace("\\", "/")
+	if path.startswith("./"):
+		path = path.removeprefix("./")
+	if path.startswith("filesystem/"):
+		path = path.removeprefix("filesystem/")
+	segs = path.split("/")
+	fixedsegs = []
+	for index, seg in enumerate(segs):
+		append = seg
+		if seg == ".":
+			append = None
+		elif seg == "..":
+			append = None
+			if len(fixedsegs) >= 1:
+				fixedsegs.pop(-1)
+		if append:
+			fixedsegs.append(append)
+	return "/".join(fixedsegs)
 
 def remove(Session, path):
 	path = normalizePath(path)
@@ -330,6 +354,16 @@ def get_size(Session, path):
 		for f in listdir(Session, path):
 			total_size += get_size(Session, os.path.join(path, f))
 		return total_size
+def get_last_modified(Session, path):
+	path = normalizePath(path)
+	if isfile(Session, path):
+		data = get_index_dict(get_index(Session), path)
+		return data.get("last_modified") or 0
+	else:
+		last_modified = 0
+		for f in listdir(Session, path):
+			last_modified = max(last_modified, get_last_modified(Session, os.path.join(path, f)))
+		return last_modified
 	
 def isdir(Session, path):
 	path = normalizePath(path)
@@ -352,9 +386,7 @@ def listdir(Session, path):
 
 	return list(dir.keys())
 
-def write(Session, path, data, last_modified=None):
-	global cursor
-
+def write(Session, path, data, last_modified=None, Progress=None):
 	if last_modified is None:
 		last_modified = time.time()
 	upload_time = time.time()
@@ -362,70 +394,74 @@ def write(Session, path, data, last_modified=None):
 	index = get_index(Session)
 	parent, file = pathsplit(path)
 
-	locks = []
+	upload_threads = []
 	downloadUrls_Index = {}
-	cindex = 0
 
 	SPLIT_CHUNK_SIZE = int(round(CHUNK_SIZE*0.95))
 
 	chunks = [data[i:i + SPLIT_CHUNK_SIZE] for i in range(0, len(data), SPLIT_CHUNK_SIZE)]
 	file_size = len(data)
 	del data
-	temp_filename = os.path.join(os.path.join(workingcwd, "temp"), uuid.uuid4().hex)
 
-	for data in chunks:
-		temp_section_filename = temp_filename+"_section_%d"%cindex
+	current_waiting_bytes_upload = 0
+	confirmed_waiting_files = 0 # the number of files that have their upload size confirmed: used to predict
+
+	for cindex, data in enumerate(chunks):
 		key = Fernet.generate_key()
 		fernet = Fernet(key)
 
 		before = len(data)
 
 		cursor = 0
-		fileintegrityhash = ""
 		
-		with open(temp_section_filename, 'wb') as fo:
-			def read(block):
-				global cursor
-				chunk = data[cursor:cursor+block]
-				cursor += block
-				if len(chunk) == 0:
-					return
-				enc = fernet.encrypt(chunk)
-				
-				return struct.pack('<I', len(enc))+enc
-			zipper = GzipCompressReadStream(read)
-			checksum_store = b""
-			while True:
-				chunkdata = zipper.read(1 << 16)
-				final = len(chunkdata) == 0
+		fo = io.BytesIO()
+		def read(block):
+			nonlocal cursor
+			chunk = data[cursor:cursor+block]
+			cursor += block
+			if len(chunk) == 0:
+				return
+			enc = fernet.encrypt(chunk)
+			
+			return struct.pack('<I', len(enc))+enc
+		zipper = GzipCompressReadStream(read)
+		
+		while True:
+			chunkdata = zipper.read(1 << 16)
+			if len(chunkdata) == 0:
+				break
+			fo.write(chunkdata)
 
-				if len(checksum_store) == (1 << 19) or final:
-					fileintegrityhash += hashlib.md5(checksum_store).hexdigest()
-					checksum_store = b""
-				if final:
-					break
-				fo.write(chunkdata)
-				checksum_store += chunkdata
-		after = os.path.getsize(temp_section_filename)
-		print("COMPRESS + ENCRYPTION: %d BYTES > %d BYTES (%s%%) | checksum %r"%(before, after, before == 0 and 100.0 or (after/before*100), fileintegrityhash))
+		after = fo.getbuffer().nbytes
+		print("COMPRESS + ENCRYPTION: %d BYTES > %d BYTES (%s%%)"%(before, after, before == 0 and 100.0 or (after/before*100)))
 
-		lock = threading.Lock()
-		lock.acquire()
-		locks.append(lock)
-		def done(url, key, cindex, lock, temp_section_filename):
-			downloadUrls_Index[cindex] = ["v2", url, key.decode(), fileintegrityhash]
-			os.remove(temp_section_filename)
-			lock.release()
+		def done(url, key, cindex):
+			downloadUrls_Index[cindex] = ["v3", {
+				"address": url,
+				"key": key.decode(),
+			}]
 
+			# ["v2", url, key.decode(), fileintegrityhash]
+		def closure():
+			last_current_file_progress = 0
+			def upd_current_file_progress(command, arg):
+				nonlocal last_current_file_progress, current_waiting_bytes_upload, confirmed_waiting_files
+				if not Progress: return
+				if command == "max":
+					current_waiting_bytes_upload += arg
+					confirmed_waiting_files += 1
+					missing_confirm_waiting_files = (len(chunks) - confirmed_waiting_files)
+					Progress.set_max(current_waiting_bytes_upload + current_waiting_bytes_upload/confirmed_waiting_files * missing_confirm_waiting_files)
+				elif command == "update":
+					Progress.progress(arg - last_current_file_progress)
+					last_current_file_progress = arg
+			upload_threads.append(
+				upload_file("data%d"%cindex, fo, done=done, args=(key, cindex), progressCallback=Progress and upd_current_file_progress)
+			)
+		closure()
 
-		upload_file("data%d"%cindex, temp_section_filename, done=done, args=(key, cindex, lock, temp_section_filename))
-
-		cindex += 1
-
-	for lock in locks:
-		if lock.locked():
-			lock.acquire()
-			lock.release()
+	for thread in upload_threads:
+		thread.join()
 
 	downloadUrls = [None for i in range(len(downloadUrls_Index.keys()))]
 	for index, value in downloadUrls_Index.items():
@@ -439,7 +475,7 @@ def write(Session, path, data, last_modified=None):
 		"size": file_size,
 		"download_urls": downloadUrls,
 		"upload_time":upload_time,
-		"last_modified":last_modified,
+		"last_modified":int(last_modified),
 	}
 
 	set_index(Session, index)
@@ -472,7 +508,6 @@ async def create_folder_archive(Session, handle, path, Progress=None):
 	os.mkdir(TEMP_FOLDER)
 	
 	write_directory_threads = write_directory(Session, path, TEMP_FOLDER)
-	Progress.listen(lambda p: print("Zip File Collection Progress: %s%%"%round(p*100, 1)))
 	Progress.set_max(len(write_directory_threads))
 	for thread in write_directory_threads: thread.join(); Progress.progress()
 	print("All Required Files Downloaded. Zipping...")
@@ -496,6 +531,7 @@ async def create_folder_archive(Session, handle, path, Progress=None):
 
 def rename(Session, frompath, topath):
 	frompath, topath = normalizePath(frompath), normalizePath(topath)
+	print(frompath, topath)
 
 	data = remove(Session, frompath)
 
@@ -525,36 +561,52 @@ def mkdir(Session, path):
 	set_index(Session, index)
 	GLOBAL_INDEX_LOCK.release()
 
-def streamUrlDownload(address, handle):
+def streamUrlDownload(address, handle, progress=None):
 	addressversion, url, key, fileintegrityhash = None, None, None, None
-	if len(address) == 2:
-		(url, key) = address
-	else:
+	addressversion = address[0]
+	if addressversion == "v2":
 		(addressversion, url, key, fileintegrityhash) = address
+	elif addressversion == "v3":
+		(addressversion, data) = address
+		url, key = data.get("address"), data.get("key")
+	else:
+		(url, key) = address
+	
+	# allocate 50% to downloading the file and 50% to decompressing + decrypting the file
+	p_download = 0
+	p_download_max = 0
+	p_decompress_decrypt = 0
+	p_decompress_decrypt_max = 0
+	progress("max", 1)
+	def p_send_progress():
+		progress("update", 
+			(p_download/p_download_max) * 0.5 + 
+			(p_decompress_decrypt_max > 0 and (p_decompress_decrypt/p_decompress_decrypt_max) * 0.5 or 0)
+		)
+
 	temp_section_filename_encrypted = os.path.join("temp", uuid.uuid4().hex)
 	print("[STREAM FILE] %s WITH KEY %s > %s"%(url, key, temp_section_filename_encrypted))
 	with open(temp_section_filename_encrypted, "wb") as temp_section_handle:
 		with requests.get(url, stream=True) as r:
+			p_download_max = int(r.headers["Content-Length"])
 			for chunk in r.iter_content(chunk_size=1 << 16):
 				temp_section_handle.write(chunk)
+				p_download += len(chunk)
+				p_send_progress()
 
 	print("[STREAM FILE] DECOMPRESSING + DECRYPTING")
 	fernet = Fernet(key)
 	with open(temp_section_filename_encrypted, 'rb') as fileobj:
-		if fileintegrityhash:
-			index = 0
-			while True:
-				data = fileobj.read(1 << 19)
-				if len(data) == 0:
-					break
-				chunk_checksum = hashlib.md5(data).hexdigest()
-				chunk_checksum_integrity = fileintegrityhash[index * 32:(index+1) * 32]
-				if chunk_checksum != chunk_checksum_integrity:
-					raise ChecksumMismatch("Checksum mismatch: (chunk_checksum=%r, integrity=%r) @ byte %d"%(chunk_checksum, chunk_checksum_integrity, fileobj.tell()))
-				index += 1
-
-			fileobj.seek(0)
-
+		p_decompress_decrypt_max = os.fstat(fileobj.fileno()).st_size
+		
+		# hijack read to provide us with progress #hacky
+		original_read = fileobj.read
+		def modified_read(chunkSize):
+			nonlocal p_decompress_decrypt
+			p_decompress_decrypt = fileobj.tell()
+			p_send_progress()
+			return original_read(chunkSize)
+		fileobj.read = modified_read
 		gzipstream = gzip.GzipFile(None, mode='rb', fileobj=fileobj)
 		while True:
 			size_data = gzipstream.read(4)
@@ -567,30 +619,44 @@ def streamUrlDownload(address, handle):
 	print("[STREAM FILE] COMPLETE")
 
 def download(Session, path, writehandle, Progress=None):
-	global nextWriteIndex
 	if type(writehandle) == io.TextIOWrapper:
 		assert writehandle.mode == "wb", "File handle must be in mode \"wb\""
 
 	path = normalizePath(path)
 	data = get_index_dict(get_index(Session), path)
 
-	if Progress: Progress.listen(lambda p: print("Combine Files process: %s%%"%round(p*100, 1)))
 	nextWriteIndex = 0
-	def fetchContent(index, address, writehandle):
-		global nextWriteIndex
+	def fetchContent(index, address, writehandle, upd_current_file_progress):
+		nonlocal nextWriteIndex
 		while nextWriteIndex != index:
 			time.sleep(0.01)
-		streamUrlDownload(address, writehandle)
-		if Progress: Progress.progress()
+		streamUrlDownload(address, writehandle, upd_current_file_progress)
 		nextWriteIndex += 1
 
 	if data.get("download_urls"):
 		threads = []
+
+		current_waiting_bytes_download, confirmed_waiting_files = 0, 0
 		for index, address in enumerate(data["download_urls"]):
-			thread = threading.Thread(target=fetchContent, args=(index, address, writehandle))
-			thread.start()
-			threads.append(thread)
-		if Progress: Progress.set_max(index+1)
+			def closure():
+				last_current_file_progress = 0
+				def upd_current_file_progress(command, arg):
+					nonlocal last_current_file_progress, current_waiting_bytes_download, confirmed_waiting_files
+					if not Progress: return
+					if command == "max":
+						current_waiting_bytes_download += arg
+						confirmed_waiting_files += 1
+						missing_confirm_waiting_files = (len(data["download_urls"]) - confirmed_waiting_files)
+						Progress.set_max(current_waiting_bytes_download + current_waiting_bytes_download/confirmed_waiting_files * missing_confirm_waiting_files)
+					elif command == "update":
+						Progress.progress(arg - last_current_file_progress)
+						last_current_file_progress = arg
+				thread = threading.Thread(target=fetchContent, args=(index, address, writehandle, upd_current_file_progress))
+				thread.start()
+				threads.append(thread)
+			closure()
+
+			
 		for thread in threads: thread.join()
 		print("combine %d files: complete"%(index+1))
 
