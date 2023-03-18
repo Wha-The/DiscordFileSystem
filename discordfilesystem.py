@@ -1,3 +1,21 @@
+"""
+Discord File System
+Copyright (C) 2022  NWhut
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
 import os
 os.environ["USERPROFILE"] = os.environ.get("USERPROFILE") or os.environ["HOME"]
 import sys
@@ -13,7 +31,9 @@ import struct
 import io
 import uuid
 import gzip
+import subprocess
 import hashlib
+from aes import AESCipher
 from cryptography.fernet import Fernet, InvalidToken as FernetInvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -68,6 +88,126 @@ class DriveExistsError(Exception): pass
 class DriveNotFoundError(Exception): pass
 _GlobalCloudDriveCache = {}
 CLOUD_DRIVE_CACHE_EXPIRE = 3
+class RDADrive():
+	class ConnectionError(Exception): pass
+	def __init__(self, info):
+		self.RDAConnectionInfo = info
+		self.RDAConnectionId = f"rda:{info['remote-ip']} ({info['entry-name']})"
+	def get_connection_namehash_cipher(self):
+		namehash = hashlib.sha256(self.RDAConnectionInfo["entry-name"].encode()).hexdigest()
+		return namehash, AESCipher(namehash + self.RDAConnectionInfo["remote-passphrase"])
+	def prepare_payload(self, payload):
+		namehash, cipher = self.get_connection_namehash_cipher()
+		return json.dumps({
+			"name": namehash,
+			"payload": cipher.encrypt(json.dumps(payload)).decode(),
+		})
+	def get_wifi_name(self):
+		if sys.platform == "darwin":
+			process = subprocess.Popen(['/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport','-I'], stdout=subprocess.PIPE)
+			out, err = process.communicate()
+			process.wait()
+			for line in out.decode().split("\n"):
+				if line.strip().startswith("SSID:"):
+					return line.strip().removeprefix("SSID:").strip()
+		return ""
+
+	def on_restricted_wifi(self):
+		n = self.get_wifi_name()
+		for term in ["Staff", "Student", "School"]:
+			if term.lower() in n.lower():
+				return True
+		return False
+	def pre_request(self):
+		print("[RDADrive] Establishing connection...")
+		if self.on_restricted_wifi():
+			try:
+				response = requests.get(f"http://{self.RDAConnectionInfo['remote-ip']}/api/ping")
+			except Exception:
+				raise self.ConnectionError
+			data = response.content.decode()
+
+			# fortiguard bypass
+			if response.status_code == 403 and "fortinet.net" in data:
+				print("[RDADrive] Detected network restriction: fortinet.net")
+				temporary_unblock_uri = data.split('onclick="document.location.href=\'', 1)[1].split("\'")[0]
+				try:
+					response = requests.get(temporary_unblock_uri, verify=False, allow_redirects=False)
+				except Exception:
+					raise self.ConnectionError
+				if response.status_code == 302:
+					redirect = response.headers.get("Location")
+					if redirect:
+						if redirect.startswith("https://"):
+							redirect = "http://"+redirect.removeprefix("https://")
+						try:
+							response = requests.get(redirect, allow_redirects=False)
+						except Exception:
+							raise self.ConnectionError
+						if "Authentication was successful" in response.content.decode():
+							print("[RDADrive] Unblocked network restriction")
+							return True
+
+	def get(self):
+		if type(_GlobalCloudDriveCache.get(self.RDAConnectionId)) == dict:
+			if time.time() < _GlobalCloudDriveCache[self.RDAConnectionId]["expires"]:
+				return _GlobalCloudDriveCache[self.RDAConnectionId]["data"]
+			del _GlobalCloudDriveCache[self.RDAConnectionId]
+		elif type(_GlobalCloudDriveCache.get(self.RDAConnectionId)) == threading.Lock:
+			lock = _GlobalCloudDriveCache[self.RDAConnectionId]
+			lock.acquire()
+			lock.release()
+			return _GlobalCloudDriveCache[self.RDAConnectionId]
+
+		lock = threading.Lock()
+		lock.acquire()
+		_GlobalCloudDriveCache[self.RDAConnectionId] = lock
+		self.pre_request()
+		try:
+			response = requests.get(f"{self.RDAConnectionInfo.get('protocol') or 'http'}://{self.RDAConnectionInfo['remote-ip']}/api/remote-drive-access", data=self.prepare_payload({"passphrase": self.RDAConnectionInfo["remote-passphrase"]}))
+		except Exception:
+			traceback.print_exc()
+			raise self.ConnectionError
+		if response.status_code == 404:
+			raise DriveNotFoundError
+		lock.release()
+		namehash, cipher = self.get_connection_namehash_cipher()
+		data = cipher.decrypt(response.content).encode()
+		_GlobalCloudDriveCache[self.RDAConnectionId] = {
+			"expires": time.time() + CLOUD_DRIVE_CACHE_EXPIRE,
+			"data": data,
+		}
+		return data
+	def exists(self):
+		self.pre_request()
+		try:
+			response = requests.get(f"{self.RDAConnectionInfo.get('protocol') or 'http'}://{self.RDAConnectionInfo['remote-ip']}/api/remote-drive-access", data=self.prepare_payload({"passphrase": self.RDAConnectionInfo["remote-passphrase"]}), timeout=6)
+		except:
+			traceback.print_exc()
+			return False
+		if response.status_code == 404:
+			return False
+		return True
+	def write(self, data):
+		_GlobalCloudDriveCache[self.RDAConnectionId] = {
+			"expires": time.time() + CLOUD_DRIVE_CACHE_EXPIRE,
+			"data": data,
+		}
+		def update():
+			self.pre_request()
+			try:
+				response = requests.put(f"{self.RDAConnectionInfo.get('protocol') or 'http'}://{self.RDAConnectionInfo['remote-ip']}/api/remote-drive-access", data=self.prepare_payload({"data": data.decode()}))
+			except Exception as e:
+				traceback.print_exc()
+				raise self.ConnectionError
+			if response.status_code == 404:
+				raise DriveNotFoundError
+		threading.Thread(target=update).start()
+	def read(self):
+		return self.get()
+	def export_drive_key(self):
+		return self.RDAConnectionId
+
 class CloudDrive():
 	class ConnectionError(Exception): pass
 	def __init__(self, drive):
@@ -188,7 +328,10 @@ class Session():
 		except: pass
 		return False
 	def retrieve_drive(self):
-		if self.drive_key.startswith("cloud:"):
+		if type(self.drive_key) == dict and all(map(self.drive_key.get, ["entry-name", "remote-ip", "remote-passphrase"])):
+			# RDA Drive
+			self.drive = RDADrive(self.drive_key)
+		elif self.drive_key.startswith("cloud:"):
 			# cloud drive
 			self.drive = CloudDrive(self.drive_key)
 		elif self.drive_key.startswith("ramdisk:"):
@@ -196,6 +339,7 @@ class Session():
 		else:
 			self.drive = LocalDrive(self.drive_key.replace(os.environ["USERPROFILE"], r"%user%"))
 		self.export_drive_key = self.drive.export_drive_key
+		self.write_export_drive_key = hasattr(self.drive, "write_export_drive_key") and self.drive.write_export_drive_key or self.export_drive_key
 	def test_if_drive_exists(self, invert=False):
 		f = invert and (lambda x:not x) or (lambda x:x)
 		if not f(self.drive.exists()):
@@ -277,7 +421,7 @@ def set_index(Session, data):
 	encrypted = Fernet(Session.fernet_key).encrypt(START_PADDING + json.dumps(data).encode() + END_PADDING)
 
 	metadata = get_index_metadata(Session)
-	metadata["location"] = Session.export_drive_key()
+	metadata["location"] = Session.write_export_drive_key()
 
 	encrypted = b"METADATA: " + json.dumps(metadata).encode() + b"\n" + encrypted
 	Session.drive.write(encrypted)
@@ -291,9 +435,9 @@ def get_index_dict(index, path):
 	dir = index
 	build = ""
 	for segment in path:
-		dir = dir.get(segment)
-		if dir is None:
-			raise PathNotFoundError("Path not found: %s/[%s ?]"%(build, segment))
+		if not segment in dir: raise PathNotFoundError("Path not found: %s/[%s ?]"%(build, segment))
+		dir = dir.get(segment) or {}
+			
 		build += "/"+segment
 	return dir
 
@@ -329,7 +473,7 @@ def remove(Session, path):
 	parentDirectory, file = pathsplit(path)
 	index = get_index(Session)
 	parentDirectoryIndex = get_index_dict(index, parentDirectory)
-	if parentDirectoryIndex.get(file) is None: return print("ERR_F1: %s, %s"%(parentDirectoryIndex, file))
+	if file not in parentDirectoryIndex: return print("ERR_F1: %s, %s"%(parentDirectoryIndex, file))
 
 	originalData = parentDirectoryIndex[file]
 	del parentDirectoryIndex[file]
@@ -459,7 +603,6 @@ def write(Session, path, data, last_modified=None, Progress=None):
 				upload_file("data%d"%cindex, fo, done=done, args=(key, cindex), progressCallback=Progress and upd_current_file_progress)
 			)
 		closure()
-
 	for thread in upload_threads:
 		thread.join()
 
@@ -521,9 +664,9 @@ async def create_folder_archive(Session, handle, path, Progress=None):
 			else:
 				filesmap.append({
 					"file": vpath,
+					"name": os.path.join(path, f),
 				})
 	mapDirectory(TEMP_FOLDER)
-
 	aiozip = AioZipStream(filesmap, chunksize=1 << 16)
 	async for chunk in aiozip.stream():
 		handle.write(chunk)
@@ -531,7 +674,6 @@ async def create_folder_archive(Session, handle, path, Progress=None):
 
 def rename(Session, frompath, topath):
 	frompath, topath = normalizePath(frompath), normalizePath(topath)
-	print(frompath, topath)
 
 	data = remove(Session, frompath)
 

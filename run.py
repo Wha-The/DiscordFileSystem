@@ -1,3 +1,21 @@
+"""
+Discord File System
+Copyright (C) 2022  NWhut
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
 print("Loading...")
 import tornado.ioloop
 import tornado.web
@@ -43,7 +61,7 @@ else:
 
 from aes import AESCipher
 import discordfilesystem as filesystem
-
+import rda_config as RemoteDrivesConfig
 
 Quote = ""
 
@@ -84,18 +102,19 @@ NEW_CONNECTIONS_LISTENERS = []
 class BaseHandler(tornado.web.RequestHandler):
 	def write_error(self, status_code, **kwargs):
 		excp = kwargs['exc_info'][1]
-		tb   = kwargs['exc_info'][2]
+		tb = kwargs['exc_info'][2]
 		stack = traceback.extract_tb(tb)
 		clean_stack = [i for i in stack if i[0][-6:] != 'gen.py' and i[0][-13:] != 'concurrent.py']
-		error_msg = '{}\n{}'.format(''.join(traceback.format_list(clean_stack)),excp)
-		print(error_msg)
+		error_msg = '{}\n{}'.format(''.join(traceback.format_list(clean_stack)), excp)
 		self.set_status(status_code)
 		self.write(str(excp))
 	def prepare(self):
-		if self.request.remote_ip != ip and self.request.remote_ip not in open("confidential/ip_whitelist",'r').read().splitlines():
-			if NEW_CONNECTIONS_LISTENERS:
-				[conn.send_message(json.dumps({"connection_ip": self.request.remote_ip, "user_agent":self.request.headers.get("User-Agent") or ""})) for conn in NEW_CONNECTIONS_LISTENERS]
-			raise tornado.web.HTTPError(401, reason="Unauthorized IP: %r"%(self.request.remote_ip))
+		if not self.request.uri in ["/api/remote-drive-access", "/api/ping"]:
+			if self.request.remote_ip != ip and self.request.remote_ip not in open("confidential/ip_whitelist",'r').read().splitlines():
+				if NEW_CONNECTIONS_LISTENERS:
+					[conn.send_message(json.dumps({"connection_ip": self.request.remote_ip, "user_agent":self.request.headers.get("User-Agent") or ""})) for conn in NEW_CONNECTIONS_LISTENERS]
+				self.request.connection.close()
+				raise tornado.web.HTTPError(401, reason="Unauthorized IP: %r"%(self.request.remote_ip))
 
 	def FileSystem_checkAuthenticated(self,redirect=True):
 		if not self.get_database_session_from_user().valid:
@@ -161,14 +180,15 @@ class LogoutHandler(BaseHandler):
 		self.clear_cookie("FileSystem_SessionInfo")
 		self.redirect("/")
 class ScriptsHandler(BaseHandler):
-	def get(self,script=""):
-		css = script=="css"
-		self.set_header("content-type",(css and "text/css" or "application/javascript"))
-		path = "./src/"+script+"."+(css and "css" or "js")
+	def get(self, script=""):
+		if not "." in script: script = script + ".js"
+		self.set_header("Content-Type", (script.endswith(".css") and "text/css" or "application/javascript"))
+		path = f"./src/{script}"
 		if not ".." in path and os.path.exists(path):
-			self.write(open(path,'r').read())
+			with open(path, "rb") as f:
+				self.write(f.read())
 			return
-		self.write("""console.error('Tried to fetch unknown script %s')"""%(self.request.uri))
+		self.write(f"console.error('Tried to fetch unknown script {self.request.uri}')")
 
 
 # -------------- FileSystem -------------------
@@ -235,7 +255,7 @@ class FileSystemWebSocketHandler(tornado.websocket.WebSocketHandler, BaseHandler
 			self.send_message(json.dumps({
 				"action":action,
 				"cwd":cwd,
-				"drive":self.get_database_session_from_user().drive_key,
+				"drive":self.get_database_session_from_user().export_drive_key(),
 				"files":[
 					{
 						"name":file,
@@ -365,19 +385,14 @@ class FileProgressWebSocketHandler(tornado.websocket.WebSocketHandler, BaseHandl
 
 				self._open_progress_listner = (GlobalProgressDict[progressid][1], c, GlobalProgressDict[progressid][0])
 			else:
+				self.send_message(json.dumps({"progress": 1}))
+				self.send_message(json.dumps({"completed": True}))
 				print("tried to listen to progress that doesn't exist? pid: "+progressid)
 	def on_close(self):
 		if hasattr(self, "_open_progress_listner"):
 			self._open_progress_listner[0].unlisten(self._open_progress_listner[1])
 			self._open_progress_listner[2].remove(self)
 			del self._open_progress_listner
-
-def get_writeflusher(_self):
-	class _construct():
-		def write(self, *args):
-			_self.write(*args)
-			io_loop.asyncio_loop.call_soon_threadsafe(_self.flush)
-	return _construct()
 
 FileDownloadAccessKeys = {}
 class FileSystemDownloadHandler(BaseHandler):
@@ -402,10 +417,10 @@ class FileSystemDownloadHandler(BaseHandler):
 			self._auto_finish = False
 			self.set_header('Content-Type', 'application/octet-stream')
 			_, dwFileName = filesystem.pathsplit(file_name)
-			self.set_header('Content-Disposition', "attachment; filename="+dwFileName)
+			self.set_header('Content-Disposition', f"attachment; filename=\"{dwFileName}\"")
 			#self.set_header("Content-Length", filesystem.get_size(self.get_database_session_from_user(), path))
 			def thread_c():
-				filesystem.download(self.get_database_session_from_user(), path, get_writeflusher(self), Progress=GlobalProgressDict[FileDownloadAccessKeys[accesskey][1]][1])
+				filesystem.download(self.get_database_session_from_user(), path, self, Progress=GlobalProgressDict[FileDownloadAccessKeys[accesskey][1]][1])
 				self.complete_progress(FileDownloadAccessKeys[accesskey][1])
 				io_loop.asyncio_loop.call_soon_threadsafe(self.finish)
 			threading.Thread(target=thread_c).start()
@@ -421,7 +436,7 @@ class FileSystemDownloadHandler(BaseHandler):
 		firstname = os.path.split(file_name)[-1]
 		self.set_header('Content-Disposition', 'attachment; filename=' + (firstname+".zip"))
 		async def thread_c():
-			await filesystem.create_folder_archive(self.get_database_session_from_user(), get_writeflusher(self), path, Progress=GlobalProgressDict[FileDownloadAccessKeys[accesskey][1]][1])
+			await filesystem.create_folder_archive(self.get_database_session_from_user(), self, path, Progress=GlobalProgressDict[FileDownloadAccessKeys[accesskey][1]][1])
 			self.complete_progress(FileDownloadAccessKeys[accesskey][1])
 			self.finish()
 		threading.Thread(target=asyncio.run, args=(thread_c(),)).start()
@@ -433,6 +448,15 @@ class FileSystemLoginHandler(BaseHandler):
 	def post(self):
 		drive = self.server_decrypt(self.get_argument("drive",""))
 		password = self.server_decrypt(self.get_argument("password",""))
+		if drive.startswith("rda:"):
+			xdrive = drive
+			drive = None
+			for remote in RemoteDrivesConfig.REMOTE:
+				x_compare = f"rda:{remote['remote-ip']} ({remote['entry-name']})"
+				if xdrive == x_compare:
+					drive = remote
+			if not drive:
+				return self.write(self.server_encrypt(json.dumps({"error":"Unknown RDA entry. "})))
 		try:
 			session = filesystem.Session(drive=drive, key=password)
 			session.test_if_drive_exists()
@@ -457,6 +481,55 @@ class CreateDriveHandler(BaseHandler):
 			traceback.print_exc()
 			return self.write({"error":str(e)})
 		self.write({"content":"/", "message":"Success! Please login to your drive."})
+
+class RemoteDriveAccess(BaseHandler):
+	def parse_data(self):
+		# x- prefixed variables = server variables; f-prefixed variables = input variables;
+		try:
+			data = json.loads(self.request.body)
+			f_entry_name_hashed, f_payload_encrypted = data["name"], data["payload"]
+		except Exception:
+			raise tornado.web.HTTPError(400, reason="Invalid Payload")
+
+		# fetch passphrase for entry_name and attempt to decrypt
+		for x_entry in RemoteDrivesConfig.ALLOW:
+			x_entry_name_hashed = hashlib.sha256(x_entry["entry-name"].encode()).hexdigest()
+			if x_entry_name_hashed == f_entry_name_hashed:
+				# found our entry!
+				x_entry_passphrase = x_entry["passphrase"]
+				# attempt to decrypt payload with passphrase
+				try:
+					cipher = AESCipher(x_entry_name_hashed + x_entry_passphrase)
+					f_payload = json.loads(cipher.decrypt(f_payload_encrypted))
+				except Exception:
+					traceback.print_exc()
+					raise tornado.web.HTTPError(400, reason="Invalid Passphrase")
+
+				return x_entry, f_payload, cipher
+		raise tornado.web.HTTPError(404, reason="Invalid entry-name")
+
+	def get(self):
+		# get = read
+		entry, data, cipher = self.parse_data()
+		if entry.get("accepting") and entry["accepting"] != "any":
+			if self.request.remote_ip not in entry["accepting"]:
+				raise tornado.web.HTTPError(401, reason="Unauthorized IP")
+		drive = entry.get("drive")
+		if data.get("passphrase") != entry["passphrase"]: raise tornado.web.HTTPError(401, "Unauthorized") # prevent brute force attacks. as you can see we require no data, and this is scary since the only way we are able to
+		# verify the password is with the data
+		with open(os.path.join(filesystem.workingcwd, "confidential/drives/%s.sfsdrive"%(drive,)), "rb") as f:
+			self.write(cipher.encrypt(f.read().decode()))
+
+	def put(self):
+		# put = write
+		entry, data, cipher = self.parse_data()
+		if entry.get("accepting") and entry["accepting"] != "any":
+			if self.request.remote_ip not in entry["accepting"]:
+				raise tornado.web.HTTPError(401, reason="Unauthorized IP")
+		drive = entry.get("drive")
+		with open(os.path.join(filesystem.workingcwd, "confidential/drives/%s.sfsdrive"%(drive,)), "w") as f:
+			f.write(data["data"])
+
 class ResourcesHandler(BaseHandler):
 	def get(self):
 		file_name = self.get_argument("filename","")
@@ -495,6 +568,10 @@ class GetDrivesHandler(BaseHandler):
 				drives.insert(0, driveName)
 			else:
 				drives.append(driveName)
+
+		for remote in RemoteDrivesConfig.REMOTE:
+			drives.append(f"rda:{remote['remote-ip']} ({remote['entry-name']})")
+				
 		self.write(self.server_encrypt(json.dumps(drives)))
 
 ConnectedClients = set()
@@ -550,6 +627,14 @@ class AcceptIPAddressHandler(BaseHandler):
 			return self.write(self.server_encrypt(json.dumps({"success": True, "message": "Success! Please reload the page on your device!"})))
 		self.write(self.server_encrypt(json.dumps({"success": False, "message": "Something went wrong, please try again!"})))
 
+class PingHandler(BaseHandler):
+	def get(self):
+		self.write("pong")
+
+class ErrorHandler(BaseHandler):
+	def prepare(self):
+		super().prepare()
+		raise tornado.web.HTTPError(404, reason="not found")
 
 class App(tornado.web.Application):
 	is_closing = False
@@ -579,22 +664,24 @@ def make_app():
 		(r"/allow-new-device", AllowNewIPAddress),
 		(r"/logout",LogoutHandler),
 
-		(r"/src/(?P<script>\w+)",ScriptsHandler),
+		(r"/src/(?P<script>[\w\.]+)",ScriptsHandler),
 		(r"/resource",ResourcesHandler),
 		(r"/favicon.ico", FaviconHandler),
 		(r"/api/download",FileSystemDownloadHandler),
 		(r"/api/fetch_local_drives", GetDrivesHandler),
 		(r"/api/upload", FileSystemUploadHandler),
+		(r"/api/remote-drive-access", RemoteDriveAccess),
 		(r"/api/get_cloudfile_driveprotocol_help", GetCloudFileDriveProtocolHelp),
 
 		(r"/api/websocket", FileSystemWebSocketHandler),
 		(r"/api/file_progress_websocket", FileProgressWebSocketHandler),
 		(r"/api/listen_for_new_devices_websocket", ListenForNewDevicesWebSocketHandler),
 		(r"/api/accept_ip", AcceptIPAddressHandler),
+		(r"/api/ping", PingHandler),
 		(r"/info_websocket",InfoWebSocketHandler),
 
 		(r"/rsa_generate", GenerateRSAKey),
-	],**settings),settings
+	], default_handler_class=ErrorHandler, **settings),settings
 
 if __name__ == "__main__":
 	PORT = 8888
