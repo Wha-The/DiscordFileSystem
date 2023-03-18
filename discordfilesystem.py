@@ -436,7 +436,7 @@ def get_index_dict(index, path):
 	build = ""
 	for segment in path:
 		if not segment in dir: raise PathNotFoundError("Path not found: %s/[%s ?]"%(build, segment))
-		dir = dir.get(segment) or {}
+		dir = dir.get(segment)
 			
 		build += "/"+segment
 	return dir

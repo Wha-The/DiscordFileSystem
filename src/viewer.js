@@ -496,13 +496,32 @@ function getFileContents(fname, finish, doNotMonitor) {
     }, doNotMonitor)
 }
 
-function getFileContentsAsDataUrl(fname, finish, doNotMonitor) {
+function getFileContentsAsBlobUrl(fname, finish, doNotMonitor) {
     if (!pingws()) return
     getFileDownloadLink(fname, function(redirect) {
         var xhr = new XMLHttpRequest();
         xhr.onreadystatechange = function() {
             if (this.readyState == 4 && this.status == 200) {
                 finish(URL.createObjectURL(new Blob([this.response])))
+            }
+        }
+        xhr.open('GET', redirect);
+        xhr.responseType = 'blob';
+        xhr.send();
+    }, doNotMonitor)
+}
+function getFileContentsAsDataUrl(fname, finish, doNotMonitor){
+    if (!pingws()) return
+    getFileDownloadLink(fname, function(redirect) {
+        var xhr = new XMLHttpRequest();
+        xhr.onreadystatechange = function() {
+            if (this.readyState == 4 && this.status == 200) {
+                let reader = new FileReader();
+                reader.onload = function() {
+                  let dataUrl = reader.result;
+                  finish(dataUrl);
+                };
+                reader.readAsDataURL(new Blob([this.response]))
             }
         }
         xhr.open('GET', redirect);
@@ -525,6 +544,8 @@ var edit_callbacks = {
     ".jpg": editpng,
     ".jpeg": editpng,
     ".gif": editpng,
+
+    ".pdf": editpdf,
 }
 
 function edit(evt) {
@@ -549,7 +570,7 @@ function setup_popup(popup) {
 
 function editmp3() {
     var load_fname = SELECTED
-    getFileContentsAsDataUrl(load_fname, function(url) {
+    getFileContentsAsBlobUrl(load_fname, function(url) {
     	var popFrom = document.getElementById("file_"+load_fname).getBoundingClientRect()
         popup = window.open(" ", "Audio Player", {width: 325, height:150, initialX: popFrom.left + 50, initialY: popFrom.top + popFrom.height/2})
         writedata = `
@@ -603,7 +624,7 @@ navigator.mediaSession.setActionHandler('nexttrack', function() {
             if (!SELECTED) select(popup.document.title)
             while (relselectmove(back && -1 || 1) && !SELECTED.endsWith(".mp3")) {}
             if (SELECTED.endsWith(".mp3")) {
-                getFileContentsAsDataUrl(SELECTED, (url) => {
+                getFileContentsAsBlobUrl(SELECTED, (url) => {
                     v.querySelector("source").src = url
                     v.load()
                     v.play()
@@ -628,6 +649,10 @@ navigator.mediaSession.setActionHandler('nexttrack', function() {
         		event.preventDefault()
         		v.paused ? v.play() : v.pause()
         	}
+            if (event.code == "Tab"){
+                event.preventDefault()
+                popup.do_skip(event.shiftKey)
+            }
         	if (event.code == "KeyL"){
         		event.preventDefault()
         		popup.document.getElementById("bool_loop").click()
@@ -641,19 +666,48 @@ navigator.mediaSession.setActionHandler('nexttrack', function() {
     })
 }
 
+function editpdf() {
+    var load_fname = SELECTED
+    var popFrom = document.getElementById("file_"+load_fname).getBoundingClientRect()
+    popup = window.open(" ", "PDF Viewer - "+load_fname, {width:1000, height:800, initialX: popFrom.left + 50, initialY: popFrom.top + popFrom.height/2})
+    writedata = `
+<body style="margin: 0 0 0 0; overflow: hidden;">
+    <title>PDF Viewer</title>
+    <iframe width=100% height=100% id="iframe" class="noselect" draggable="false">
+</body>
+            `
+    popup.$ = $
+    popup.document.write(writedata)
+    popup.document.addEventListener("keydown", function(event) {
+        if (event.code == "Space") {
+            event.preventDefault()
+            popup.close()
+        }
+    })
+    setup_popup(popup)
+    getFileContentsAsDataUrl(SELECTED, function(url) {
+        var base64 = url.split(',')[1]
+
+        var iframe = popup.document && popup.document.getElementById("iframe")
+        if(iframe) iframe.src = `data:application/pdf;base64,${base64}`
+    })
+
+}
+
 function editpng() {
 	var load_fname = SELECTED
+    var popFrom = document.getElementById("file_"+load_fname).getBoundingClientRect()
+    popup = window.open(" ", "Image Viewer", {width:145, height:145, initialX: popFrom.left + 50, initialY: popFrom.top + popFrom.height/2})
+    writedata = `
+<body style="margin: 0 0 0 0">
+    <title>Image Viewer</title>
+    <img width=100% height=100% style="object-fit: contain;" id="image" class="noselect" draggable="false">
+</body>
+            `
+    popup.$ = $
+    popup.document.write(writedata)
     getFileDownloadLink(SELECTED, function(url) {
-    	var popFrom = document.getElementById("file_"+load_fname).getBoundingClientRect()
-        popup = window.open(" ", "Image Viewer", {width:145, height:145, initialX: popFrom.left + 50, initialY: popFrom.top + popFrom.height/2})
-        writedata = `
-	<body style="margin: 0 0 0 0">
-		<title>Image Viewer</title>
-		<img width=100% height=100% style="object-fit: contain;" id="image" class="noselect" draggable="false">
-	</body>
-				`
-        popup.$ = $
-        popup.document.write(writedata)
+        if(!popup.document) return
         var img = popup.document.getElementById("image")
         var WIDTH_SET = 600
         var _loadImage = function(url) {
@@ -691,7 +745,7 @@ function editpng() {
 
 function editmp4() {
 	var load_fname = SELECTED
-    getFileContentsAsDataUrl(SELECTED, function(url) {
+    getFileContentsAsBlobUrl(SELECTED, function(url) {
     	var popFrom = document.getElementById("file_"+load_fname).getBoundingClientRect()
         popup = window.open("", "Video Player", {width: 1000, height: 500, initialX: popFrom.left + 50, initialY: popFrom.top + popFrom.height/2})
         writedata = `
@@ -809,14 +863,19 @@ function showsnack(text, timeout) {
             })
             popup.document.head.appendChild(c)
         })
-        popup.addEventListener('beforeunload', function(e) {
-            if (!popup.saved) {
-                e.preventDefault();
-                e.returnValue = 'Changes will not be saved';
+        // popup.addEventListener('beforeunload', function(e) {
+        //     if (!popup.saved) {
+        //         e.preventDefault();
+        //         e.returnValue = 'Changes will not be saved';
+        //     }
+        // });
+        popup.document.addEventListener("keydown", function(event) {
+            if(event.target.nodeName == "TEXTAREA") return
+            if (event.code == "Space") {
+                event.preventDefault()
+                popup.close()
             }
-        });
-
-
+        })
         popup.save = function() {
             var data = popup.document.getElementById("editor").value
             var file = new File([data], currentFName, {
