@@ -415,9 +415,13 @@ class FileSystemDownloadHandler(BaseHandler):
 			return
 		if filesystem.isfile(self.get_database_session_from_user(), path):
 			self._auto_finish = False
-			self.set_header('Content-Type', 'application/octet-stream')
 			_, dwFileName = filesystem.pathsplit(file_name)
-			self.set_header('Content-Disposition', f"attachment; filename=\"{dwFileName}\"")
+
+			if self.get_argument("content-type", None):
+				self.set_header("Content-Type", self.get_argument("content-type"))
+			else:
+				self.set_header('Content-Type', 'application/octet-stream')
+				self.set_header('Content-Disposition', f"attachment; filename=\"{dwFileName}\"")
 			#self.set_header("Content-Length", filesystem.get_size(self.get_database_session_from_user(), path))
 			def thread_c():
 				filesystem.download(self.get_database_session_from_user(), path, self, Progress=GlobalProgressDict[FileDownloadAccessKeys[accesskey][1]][1])

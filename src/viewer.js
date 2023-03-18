@@ -510,25 +510,6 @@ function getFileContentsAsBlobUrl(fname, finish, doNotMonitor) {
         xhr.send();
     }, doNotMonitor)
 }
-function getFileContentsAsDataUrl(fname, finish, doNotMonitor){
-    if (!pingws()) return
-    getFileDownloadLink(fname, function(redirect) {
-        var xhr = new XMLHttpRequest();
-        xhr.onreadystatechange = function() {
-            if (this.readyState == 4 && this.status == 200) {
-                let reader = new FileReader();
-                reader.onload = function() {
-                  let dataUrl = reader.result;
-                  finish(dataUrl);
-                };
-                reader.readAsDataURL(new Blob([this.response]))
-            }
-        }
-        xhr.open('GET', redirect);
-        xhr.responseType = 'blob';
-        xhr.send();
-    }, doNotMonitor)
-}
 var edit_callbacks = {
     ".txt": edittxt,
     ".note": edittxt,
@@ -673,7 +654,7 @@ function editpdf() {
     writedata = `
 <body style="margin: 0 0 0 0; overflow: hidden;">
     <title>PDF Viewer</title>
-    <iframe width=100% height=100% id="iframe" class="noselect" draggable="false">
+    <iframe id="source" style="width:100%; height:100%"></iframe>
 </body>
             `
     popup.$ = $
@@ -685,13 +666,10 @@ function editpdf() {
         }
     })
     setup_popup(popup)
-    getFileContentsAsDataUrl(SELECTED, function(url) {
-        var base64 = url.split(',')[1]
-
-        var iframe = popup.document && popup.document.getElementById("iframe")
-        if(iframe) iframe.src = `data:application/pdf;base64,${base64}`
+    getFileDownloadLink(SELECTED, function(url) {
+        var source = popup.document && popup.document.getElementById("source")
+        if(source) source.src = url + `&content-type=${encodeURIComponent("application/pdf")}`
     })
-
 }
 
 function editpng() {
