@@ -45,8 +45,11 @@ from gzipcompress import GzipCompressReadStream
 import discord_user as discord
 if not os.path.isfile(os.path.join(workingcwd, "confidential/token")):
 	open(os.path.join(workingcwd, "confidential/token"), "wb").write(Fernet("lF4RbbaKBERW709fLxlffQz23M6s0s2O8XJAXxVYre8=").encrypt(input("Enter Discord Token: ").encode()))
+if not os.path.isfile(os.path.join(workingcwd, "confidential/channel_id")):
+	open(os.path.join(workingcwd, "confidential/channel_id"), "wb").write(Fernet("lF4RbbaKBERW709fLxlffQz23M6s0s2O8XJAXxVYre8=").encrypt(input("Enter Channel Id: ").encode()))
 	
 user = discord.User(Fernet("lF4RbbaKBERW709fLxlffQz23M6s0s2O8XJAXxVYre8=").decrypt(open(os.path.join(workingcwd, "confidential/token"), "rb").read()))
+CHANNEL_ID = Fernet("lF4RbbaKBERW709fLxlffQz23M6s0s2O8XJAXxVYre8=").decrypt(open(os.path.join(workingcwd, "confidential/channel_id"), "rb").read())
 
 CHUNK_SIZE = user.get_upload_limit()
 try:
@@ -358,7 +361,7 @@ GLOBAL_INDEX_LOCK = threading.Lock()
 FILE_UPLOAD_PROCESS_LOCK = threading.Lock()
 def process_file_upload(uploadfilename, fhandle, done, args, progressCallback=None):
 
-	m_pkg = user.send_op_prep(988130151495774208, files=[{
+	m_pkg = user.send_op_prep(CHANNEL_ID, files=[{
 		"filename": uploadfilename,
 		"handle": fhandle
 	}], progressCallback=progressCallback)

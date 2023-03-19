@@ -28,7 +28,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 	<h1>Secure File System &ndash; {{Quote}}</h1><hr>
 	<p id="errmsg" style="color:red;"></p>
 	<h1 style="display:flex"><b id="drive"></b><b id="cwd"></b></h1>
-	<hr>
 	<div id="actionbar" class="btn-group">
 		<button class="btn btn-secondary btn-lg" id="actionbar_refresh" disabled>Refresh</button>
 		<button class="btn btn-secondary btn-lg" id="actionbar_cd" disabled>CD</button>
@@ -48,24 +47,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 			<ul class="fjs-list" id="files-list">
 
 			</ul>
+			<div class="fjs-sticky-bottom">
+				<ul class="fjs-list">
+					<li class='fjs-item'><a id="open_settings"><span><i class="fa fa-cog"></i><p>Settings</p></span></a></li>
+					<li class='fjs-item'><a onclick="window.location.href='/logout';"><span><i class="fa fa-sign-out"></i><p>Lock</p></span></a></li>
+				</ul>
+			</div>
 		</div>
 	</div>
 	<div id="fileUploadBars"></div>
-	<hr>
-	<br><br><br>
-	<p>Current status: <b id="status"></b></p>
-	<button type="button" onclick="connect()">Connect</button>
-	<button type="button" onclick="disconnect()">Disconnect</button>
-	<hr>
-	<div id="settings">
-		<h1>Settings</h1>
-		<label><input type="checkbox" id="settings_autoconnect" onchange="save_settings()"> Automacticly connect</label><br>
-		<label><input type="checkbox" id="settings_temporarysession" onchange="save_settings()" checked> Temporary Session</label>
-	</div>
-	<hr>	 
-	<br><br><button onclick="window.location.href='/logout';">Logout</button>
-
-
 	<input id="file-input" type="file" name="name" style="display: none;" multiple onchange="handleFiles(this.files)"/>
 	<div id="overlay">
 	  <div id="overlay_text">Drop files to upload to the CWD</div>

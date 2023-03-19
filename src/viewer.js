@@ -1,61 +1,35 @@
-JQueryNotLoadedHelp = "Please refresh your page or contact the server owner"
+const JQueryNotLoadedHelp = "Please refresh your page or contact the server owner"
 $ = window.$ || alert("JQuery was not properly loaded! " + JQueryNotLoadedHelp)
-ws = null;
-expectedstatus = "disconnected"
-
-function disconnect() {
-    expectedstatus = "disconnected"
-    document.getElementById("status").innerHTML = "Disconnected"
-    if (ws) {
-        ws.close()
-        ws = null
-    }
-}
-systemFilenames = [
+let ws = null;
+let expectedstatus = "disconnected"
+let systemFilenames = [
     ".."
 ]
-SAVED_CWD = "/"
-Settings = [
-    document.getElementById("settings_autoconnect"),
-    document.getElementById("settings_temporarysession"),
+let SAVED_CWD = "/"
+const SettingsOptions = [
+    "temporarysession",
 ]
-CURRENTSETTINGS = {}
+let Settings = {}
 
-function save_settings() {
-    ToBeSaved = {}
-    for (i = 0; i < Settings.length; i++) {
-        currentelem = Settings[i]
-        ToBeSaved[currentelem.id] = currentelem.checked
-    }
-    CookieManager.setCookie("filesystem_settings", JSON.stringify(ToBeSaved), 1)
-    CURRENTSETTINGS = ToBeSaved
+function save_settings(toBeSaved) {
+    CookieManager.setCookie("filesystem_settings", JSON.stringify(toBeSaved), 1)
+    Settings = toBeSaved
     showsnack("Changes Saved", 1000)
 }
 
 function load_settings() {
     Settings_raw = CookieManager.getCookie("filesystem_settings")
     if (Settings_raw != "") {
-        Loaded_settings = JSON.parse(Settings_raw)
-        CURRENTSETTINGS = Loaded_settings
-        Object.keys(Loaded_settings).forEach(function(key) {
-            checked = Loaded_settings[key]
-            if (checked != null) {
-                if (document.getElementById(key)) document.getElementById(key).checked = checked
-            }
-        })
-
-        return Loaded_settings
+        Settings = JSON.parse(Settings_raw)
+        return Settings
     }
     return {};
 }
-loadedfuncfinished = Scripts.runAfterLoaded("CookieManager", function() {
+Scripts.runAfterLoaded("CookieManager", function() {
     var settings = load_settings()
-    if (settings["settings_autoconnect"]) {
-        connect()
-    }
     window.addEventListener("beforeunload", function(e) {
         var settings = load_settings()
-        if ((settings["settings_temporarysession"] == undefined) || (settings["settings_temporarysession"] == true)) {
+        if (settings["temporarysession"]||(settings["temporarysession"] == undefined)) {
             CookieManager.setCookie("FileSystem_SessionInfo", "")
         }
     }, false);
@@ -204,7 +178,6 @@ function _connect(reconnection) {
     if (reconnection) {
         console.log("reconnection")
     }
-    document.getElementById("status").innerHTML = "Connecting..."
     ws = {}
     try {
         wss = new WebSocket("ws" + (window.location.protocol == "https:" && "s" || "") + "://" + location.host + "/api/websocket");
@@ -215,7 +188,6 @@ function _connect(reconnection) {
     }
 
     wss.onopen = function() {
-        document.getElementById("status").innerHTML = "Connected"
         expectedstatus = "live"
         gotopath(decodeURIComponent(location.pathname).split(/\//g).slice(2))
     };
@@ -224,7 +196,6 @@ function _connect(reconnection) {
         error: new Audio('/resource?filename=error.mp3'),
     }
     ws.onmessage = function(evt) {
-        document.getElementById("status").innerHTML = "Connected"
         response = JSON.parse(evt.data)
         error = response.error
         redirect = response.redirect
@@ -334,6 +305,7 @@ function connect(reconnection) {
         _connect(reconnection)
     })();
 }
+connect()
 SELECTED = null
 
 function pingws(noalert) {
@@ -547,6 +519,7 @@ function setup_popup(popup) {
     // popup.addEventListener("beforeunload", () => window.removeEventListener("beforeunload", lsn))
     if(_last_popup && _last_popup != popup) _last_popup.close()
     _last_popup = popup
+    popup.document.body.style.backgroundColor = "#fff"
 }
 
 function editmp3() {
@@ -755,9 +728,8 @@ function edittxt() {
     var currentFName = SELECTED
     getFileContents(SELECTED, function(data) {
     	var popFrom = document.getElementById("file_"+currentFName).getBoundingClientRect()
-        popup = window.open("", "Editor", {width: 500, height:500, initialX: popFrom.left + 50, initialY: popFrom.top + popFrom.height/2})
+        popup = window.open("", "Notepad", {width: 500, height:500, initialX: popFrom.left + 50, initialY: popFrom.top + popFrom.height/2})
         writedata = `
-<title>Editor</title>
 <style>
 #snackbar {
   visibility: hidden;
@@ -782,13 +754,110 @@ function edittxt() {
   animation: fadein 0.5s, fadeout 0.5s 2.5s;
 }
 
+.container {
+  display: block;
+  margin: 0 auto;
+  transform: translateZ(0);
+  -webkit-text-size-adjust: none;
+}
+
+.backdrop {
+  position: absolute;
+  z-index: 1;
+  background-color: #fff;
+  overflow: auto;
+  pointer-events: none;
+  transition: transform 1s;
+}
+
+.highlights {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    color: transparent;
+}
+.container, .backdrop, textarea {
+  width: 99%;
+  height: 90%;
+  padding: 2px;
+}
+textarea {
+    display: block;
+    position: absolute;
+    background-color: transparent;
+    z-index: 2;
+}
+.highlights, textarea {
+  font-face: monospace;
+  font-size: 13px;
+}
 </style>
 <div class="fjs-list" style="margin-left: 5px"><li class="fjs-item"><i class="${get_fname_icon_class(currentFName)}" style="padding-right: 5px;"></i>${currentFName}</li></div>
-<textarea style="width:100%;height:90%" id="editor">
-` + data + `
-</textarea>
+<div class="container">
+    <div class="backdrop">
+        <div class="highlights"></div>
+    </div>
+    <textarea style="resize:none;" id="editor"></textarea>
+</div>
 <div id="snackbar">Some text some message..</div>
-<sc` + `ript>
+<script>
+var $backdrop = $(document.querySelector('.backdrop'));
+var $highlights = $(document.querySelector('.highlights'));
+var $textarea = $(document.getElementById("editor"));
+
+// yeah, browser sniffing sucks, but there are browser-specific quirks to handle that are not a matter of feature detection
+var ua = window.navigator.userAgent.toLowerCase();
+var isIE = !!ua.match(/msie|trident\\/7|edge/);
+var isWinPhone = ua.indexOf('windows phone') !== -1;
+var isIOS = !isWinPhone && !!ua.match(/ipad|iphone|ipod/);
+
+function applyHighlights(text) {
+  text = text
+    .replace(/[A-Z].*?\\b/g, '<mark>$&</mark>');
+  
+  if (isIE) {
+    // IE wraps whitespace differently in a div vs textarea, this fixes it
+    text = text.replace(/ /g, ' <wbr>');
+  }
+  
+  return text;
+}
+
+function handleInput() {
+  var text = $textarea.val();
+  var highlightedText = applyHighlights(text);
+  $highlights.html(highlightedText);
+}
+
+function handleScroll() {
+  var scrollTop = $textarea.scrollTop();
+  $backdrop.scrollTop(scrollTop);
+  
+  var scrollLeft = $textarea.scrollLeft();
+  $backdrop.scrollLeft(scrollLeft);  
+}
+
+function fixIOS() {
+  // iOS adds 3px of (unremovable) padding to the left and right of a textarea, so adjust highlights div to match
+  $highlights.css({
+    'padding-left': '+=3px',
+    'padding-right': '+=3px'
+  });
+}
+
+function bindEvents() {
+  $textarea.on({
+    'input': handleInput,
+    'scroll': handleScroll
+  });
+}
+
+if (isIOS) {
+  fixIOS();
+}
+
+// bindEvents();
+// handleInput();
+
 var saved = true
 keydown = function(event) {
     if (event.ctrlKey || event.metaKey) {
@@ -818,18 +887,18 @@ function showsnack(text, timeout) {
   var x = document.getElementById("snackbar");
   x.className = "show";
   x.innerHTML = text||x.innerHTML
-  const close = function(){ x.className = x.className.replace("show", ""); }
+  let close = function(){ x.className = x.className.replace("show", ""); }
   if(timeout!=false){
   	return setTimeout(close, timeout||3000);
   }
   return close
-
 }
 
-</sc` + `ript>
+</script>
 				`
         popup.$ = $
         popup.document.write(writedata)
+        popup.document.getElementById("editor").value = data
         Array.from(document.querySelectorAll(".childWindowsInherit"), (e) => {
             var c = popup.document.createElement(e.nodeName)
             c.innerHTML = e.innerHTML
@@ -1092,8 +1161,14 @@ var contextMenu = document.getElementById("context-menu")
 var context_menu_init = function() {
     var ul = contextMenu.querySelector("ul")
     ul.innerHTML = ""
-    var ops = ["cd", "edit", "download", "rename"]
+    var ops = ["cd", "edit", "download", true, "rename", "delete", true, "upload", "newFolder", "newFile"]
     ops.forEach((choice) => {
+        if (choice == true){
+            // separator
+            if (ul.children[ul.children.length - 1].nodeName == "HR") return
+            ul.appendChild(document.createElement("hr"))
+            return
+        }
         var b = document.getElementById("actionbar_" + choice)
         if (!b.getAttribute("disabled")) {
             var li = document.createElement("li")
@@ -1105,7 +1180,6 @@ var context_menu_init = function() {
                 b.click()
             }
             ul.appendChild(li)
-
         }
     })
 }
@@ -1122,7 +1196,7 @@ document.getElementById("files-list").addEventListener("contextmenu", function(e
     var f_s = event.target.closest("li") && event.target.closest("li").classList.contains("fjs-item") && event.target.closest("li")
     if (f_s) {
         select(f_s.getAttribute("data-filename"))
-    }
+    } else{ select() }
     contextMenu.style.left = event.clientX + "px";
     contextMenu.style.top = event.clientY + "px";
     contextMenu.classList.add("context-menu-show")
@@ -1216,6 +1290,27 @@ $(dropbox).on('dragleave', function(e) {
 
 $(dropbox).on("drop", drop)
 
+var openSettingsButton = document.getElementById("open_settings")
+function open_settings(){
+    var popFrom = openSettingsButton.getBoundingClientRect()
+    popup = window.open(" ", "Settings", {width: 325, height:150, initialX: popFrom.left + 50, initialY: popFrom.top + popFrom.height/2})
+    popup.document.write(`
+<label><input type="checkbox" id="temporarysession" onchange="window.compileSettings()" checked> <p style="display: inline; font-family: sans-serif">Temporary Session</p></label>
+        `)
+    popup.compileSettings = () => {
+        let compiled = {}
+        SettingsOptions.forEach((setting) => {
+            compiled[setting] = popup.document.getElementById(setting).checked
+        })
+        save_settings(compiled)
+    }
+    setup_popup(popup)
+    for (const [setting, value] of Object.entries(load_settings())) {
+      popup.document.getElementById(setting).checked = value
+    }
+}
+openSettingsButton.onclick = open_settings
+
 var relselectmove = function(offset) {
     var s = document.getElementById("file_" + SELECTED)
     var i = Array.from(s.parentElement.children).indexOf(s)
@@ -1225,12 +1320,8 @@ var relselectmove = function(offset) {
     return n
 }
 
-document.body.addEventListener("click", function(e) {
-    var elem = e.target;
-    if (Array.from(document.querySelectorAll(".fjs-col")).includes(elem)) {
-        SELECTED = null
-        update()
-    }
+document.getElementById("files-list").addEventListener("click", function(e) {
+    if (e.target == this) select()
 });
 main_document_onkeypress = function(event) {
     if ((event.ctrlKey && event.code == "KeyF") || (event.code == "Escape" && event.target == document.getElementById("search-box"))) {
