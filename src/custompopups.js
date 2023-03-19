@@ -102,7 +102,7 @@
       }
       iframe.style.transition = "all .35s"
       iframe.style.width = popup.style.width
-      iframe.style.height = popup.style.height - 30
+      iframe.style.height = parseInt(popup.style.height) - 30
       setTimeout(() => {popup.style.transition = "box-shadow 0.2s ease 0s"; iframe.style.transition = ""}, 350)
     })
     window.addEventListener('mousemove', function(event) {

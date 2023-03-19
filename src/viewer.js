@@ -274,7 +274,6 @@ function _connect(reconnection) {
     }
 
     wss.onclose = function() {
-        document.getElementById("status").innerHTML = "Disconnected"
         if (expectedstatus != "disconnected") {
             connect(true)
         }
@@ -355,6 +354,16 @@ function download() {
 function upload() {
     document.getElementById("file-input").click()
 }
+function deleteFile(event) {
+    if (confirm(`Are you sure you want to delete "${document.getElementById("file_"+SELECTED).getAttribute("data-filename")}"?`)) {
+        ws.send(JSON.stringify({
+            action: "delFile",
+            data: {
+                file: SELECTED
+            }
+        }))
+    }
+}
 
 function rename(file) {
     elem = document.getElementById("file_" + file)
@@ -414,14 +423,9 @@ function editAddressBar() {
         }, 25)
     });
 }
-recentdoubleclick = false
 
 function select(file) {
     if (!pingws()) return
-    if (recentdoubleclick) {
-        recentdoubleclick = false
-        return
-    }
     if (SELECTED == file) {
         if (systemFilenames.includes(file)) {
             return
@@ -468,13 +472,17 @@ function getFileContents(fname, finish, doNotMonitor) {
     }, doNotMonitor)
 }
 
-function getFileContentsAsBlobUrl(fname, finish, doNotMonitor) {
+function getFileContentsAsBlobUrl(fname, finish, doNotMonitor){
+    getFileContentsAsBlob(fname, (blob) => finish(URL.createObjectURL(blob)), doNotMonitor)
+}
+
+function getFileContentsAsBlob(fname, finish, doNotMonitor) {
     if (!pingws()) return
     getFileDownloadLink(fname, function(redirect) {
         var xhr = new XMLHttpRequest();
         xhr.onreadystatechange = function() {
             if (this.readyState == 4 && this.status == 200) {
-                finish(URL.createObjectURL(new Blob([this.response])))
+                finish(new Blob([this.response]))
             }
         }
         xhr.open('GET', redirect);
@@ -499,6 +507,7 @@ var edit_callbacks = {
     ".gif": editpng,
 
     ".pdf": editpdf,
+    ".docx": editdocx,
 }
 
 function edit(evt) {
@@ -617,6 +626,36 @@ navigator.mediaSession.setActionHandler('nexttrack', function() {
         	}
         })
         setup_popup(popup)
+    })
+}
+
+function editdocx() {
+    var load_fname = SELECTED
+    var popFrom = document.getElementById("file_"+load_fname).getBoundingClientRect()
+    popup = window.open(" ", "Word Viewer", {width:1000, height:800, initialX: popFrom.left + 50, initialY: popFrom.top + popFrom.height/2})
+    writedata = `
+<script src="https://unpkg.com/jszip/dist/jszip.min.js"></script>
+<script src="/src/docx-preview.js"></script>
+<body style="margin: 0 0 0 0">
+    <div id="container" style="width: 100%; height:100%"></div>
+</body>
+<script>
+
+function load(blob){
+    docx.renderAsync(blob, document.getElementById("container"))
+}
+</script>
+            `
+    popup.$ = $
+    popup.document.write(writedata)
+    getFileContentsAsBlob(SELECTED, (blob) => {
+        popup.load(blob)
+    })
+    popup.document.addEventListener("keydown", function(event) {
+        if (event.code == "Space") {
+            event.preventDefault()
+            popup.close()
+        }
     })
 }
 
@@ -947,7 +986,6 @@ function showsnack(text, timeout) {
 function doubleclick(evt, elem) {
     evt.preventDefault()
     if (!pingws()) return
-    recentdoubleclick = true
     fname = elem.getAttribute("data-filename")
     isfile = elem.getAttribute("data-isfile") == "1"
     if (isfile) {
@@ -1099,16 +1137,7 @@ document.getElementById("actionbar_newFile").onclick = function() {
     })
     uploadSingleFile(file).then(() => refreshDirectory("Untitled.note"))
 }
-document.getElementById("actionbar_delete").onclick = function() {
-    if (confirm(`Are you sure you want to delete "${document.getElementById("file_"+SELECTED).getAttribute("data-filename")}"?`)) {
-        ws.send(JSON.stringify({
-            action: "delFile",
-            data: {
-                file: SELECTED
-            }
-        }))
-    }
-}
+document.getElementById("actionbar_delete").onclick = deleteFile
 
 document.getElementById("actionbar_rename").onclick = function() {
     rename(SELECTED)
@@ -1375,6 +1404,11 @@ main_document_onkeypress = function(event) {
     	if(SELECTED){
     		doubleclick(event, document.getElementById("file_"+SELECTED))
     	}
+    }
+    if (event.code == "Delete") {
+        if(SELECTED){
+            deleteFile(event)
+        }
     }
 }
 var _search_process = () => {

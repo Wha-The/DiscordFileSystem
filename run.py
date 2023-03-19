@@ -668,7 +668,7 @@ def make_app():
 		(r"/allow-new-device", AllowNewIPAddress),
 		(r"/logout",LogoutHandler),
 
-		(r"/src/(?P<script>[\w\.]+)",ScriptsHandler),
+		(r"/src/(?P<script>[\w\.-]+)",ScriptsHandler),
 		(r"/resource",ResourcesHandler),
 		(r"/favicon.ico", FaviconHandler),
 		(r"/api/download",FileSystemDownloadHandler),
