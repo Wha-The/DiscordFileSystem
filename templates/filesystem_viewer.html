@@ -25,14 +25,23 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     <link rel="stylesheet" href="/src/viewer.css" class="childWindowsInherit">
 </head>
 <body>
-	<h1>Secure File System &ndash; {{Quote}}</h1><hr>
+	<h1>Secure File System &ndash; {{Quote}}</h1><hr style="margin: 0 0 0 0">
 	<p id="errmsg" style="color:red;"></p>
-	<h1 style="display:flex"><b id="drive"></b><b id="cwd"></b></h1>
+	<h4 style="display:flex; margin-bottom: 0">
+		<i class="fa fa-hdd-o" style="padding: 6px 4px 0 0; display:none;"></i>
+		<b id="drive"></b>
+		<nav aria-label="breadcrumb" style="--bs-breadcrumb-divider: '>';">
+		  <ol class="breadcrumb" id="cwd">
+
+		  </ol>
+		</nav>
+	</h4>
 	<div id="actionbar" class="btn-group">
 		<button class="btn btn-secondary btn-lg" id="actionbar_refresh" disabled>Refresh</button>
 		<button class="btn btn-secondary btn-lg" id="actionbar_cd" disabled>CD</button>
 		<button class="btn btn-secondary btn-lg" id="actionbar_download" disabled>Download</button>
 		<button class="btn btn-secondary btn-lg" id="actionbar_edit" disabled>Quick Open</button>
+		<button class="btn btn-secondary btn-lg" id="actionbar_copytoclipboard" disabled>Copy Contents</button>
 		<button class="btn btn-secondary btn-lg" id="actionbar_upload" disabled>Upload</button>
 		<button class="btn btn-secondary btn-lg" id="actionbar_newFolder" disabled>New Folder</button>
 		<button class="btn btn-secondary btn-lg" id="actionbar_newFile" disabled>New Note</button>

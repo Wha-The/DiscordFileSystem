@@ -168,7 +168,12 @@ class BaseHandler(tornado.web.RequestHandler):
 	def server_decrypt(self, AES_encrypted_data):
 		if not AES_encrypted_data: return
 		cipher = self.get_shared_cipher()
-		return cipher.decrypt(AES_encrypted_data)[:-8]
+		try:
+			return cipher.decrypt(AES_encrypted_data)[:-8]
+		except ValueError as err:
+			if hasattr(err, "args") and len(err.args) >= 1 and err.args[0] == "Padding is incorrect.":
+				raise tornado.web.HTTPError(401)
+			raise
 	def server_encrypt(self, data):
 		cipher = self.get_shared_cipher()
 		return cipher.encrypt(data + str(random.randint(1e7, 1e8)))
@@ -252,6 +257,16 @@ class FileSystemWebSocketHandler(tornado.websocket.WebSocketHandler, BaseHandler
 			cwd = FileSystemClients[self]["cwd"]
 			afterselect = data.get("afterselect")
 			dirlisting = "./filesystem"+cwd
+			
+			dir_list = []
+			stick_to_end = []
+			for item in filesystem.listdir(self.get_database_session_from_user(), dirlisting):
+				if item.startswith("."):
+					stick_to_end.append(item)
+				else:
+					dir_list.append(item)
+			dir_list.extend(stick_to_end)
+
 			self.send_message(json.dumps({
 				"action":action,
 				"cwd":cwd,
@@ -263,9 +278,10 @@ class FileSystemWebSocketHandler(tornado.websocket.WebSocketHandler, BaseHandler
 						"protected":bool(getFileSystemHiddenFolders().get(f"{self.get_database_session_from_user().drive_key}:{cwd}"+file.replace("\\","/"))),
 						"size":filesystem.get_size(self.get_database_session_from_user(), "./filesystem"+cwd+"/"+file.replace("\\","/")),
 						"lastmodified": filesystem.get_last_modified(self.get_database_session_from_user(), "./filesystem"+cwd+"/"+file.replace("\\","/")),
+						"metadata": filesystem.get_metadata(self.get_database_session_from_user(), "./filesystem"+cwd+"/"+file.replace("\\","/")),
 						#"filesinside":(not bool(getFileSystemHiddenFolders().get(f"{self.get_database_session_from_user().drive_key}:{cwd}"+file.replace("\\","/"))) and filesystem.isdir(self.get_database_session_from_user(), os.path.join(dirlisting,file)) and filesystem.listdir(self.get_database_session_from_user(), os.path.join(dirlisting,file)) )
 					}
-					for file in filesystem.listdir(self.get_database_session_from_user(), dirlisting) if not "'" in file
+					for file in dir_list if (data.get("showhiddenfiles") or not file.startswith("."))
 					],
 				"afterselect":afterselect
 				}))
@@ -294,15 +310,18 @@ class FileSystemWebSocketHandler(tornado.websocket.WebSocketHandler, BaseHandler
 		elif action == "delFile":
 			file = data["file"]
 			cwd = FileSystemClients[self]["cwd"]
-			fpath = os.path.join("./filesystem"+cwd,file)
+			fpath = os.path.join(cwd, file)
 			fpath = fpath.replace("\\","/")
 			if not "/" in file:
-
-				if filesystem.isfile(self.get_database_session_from_user(), fpath):
-					filesystem.remove(self.get_database_session_from_user(), fpath)
-				if filesystem.isdir(self.get_database_session_from_user(), fpath):
-					if not getFileSystemHiddenFolders().get(f"{self.get_database_session_from_user().drive_key}:{fpath}"+file):
+				if filesystem.isfile(self.get_database_session_from_user(), fpath) or filesystem.isdir(self.get_database_session_from_user(), fpath):
+					if filesystem.isdir(self.get_database_session_from_user(), fpath) and getFileSystemHiddenFolders().get(f"{self.get_database_session_from_user().drive_key}:{fpath}"+file): return
+					if not filesystem.isdir(self.get_database_session_from_user(), "/.recycle"):
+						filesystem.mkdir(self.get_database_session_from_user(), "/.recycle")
+					if fpath.startswith("/.recycle"):
 						filesystem.remove(self.get_database_session_from_user(), fpath)
+					else:
+						filesystem.rename(self.get_database_session_from_user(), fpath, "/.recycle/"+file)
+					
 			self.send_message(json.dumps({"action":action,"success":True}))
 		elif action == "renFile":
 			file = data["from"].replace("\\","/")
@@ -413,6 +432,7 @@ class FileSystemDownloadHandler(BaseHandler):
 		if ".." in path:
 			self.write("Illegal .. in filename")
 			return
+		self.set_header("Cache-Control", "no-cache")
 		if filesystem.isfile(self.get_database_session_from_user(), path):
 			self._auto_finish = False
 			_, dwFileName = filesystem.pathsplit(file_name)
@@ -421,7 +441,7 @@ class FileSystemDownloadHandler(BaseHandler):
 				self.set_header("Content-Type", self.get_argument("content-type"))
 			else:
 				self.set_header('Content-Type', 'application/octet-stream')
-				self.set_header('Content-Disposition', f"attachment; filename=\"{dwFileName}\"")
+				self.set_header('Content-Disposition', f"attachment; filename=\"{dwFileName.replace(',', '')}\"")
 			#self.set_header("Content-Length", filesystem.get_size(self.get_database_session_from_user(), path))
 			def thread_c():
 				filesystem.download(self.get_database_session_from_user(), path, self, Progress=GlobalProgressDict[FileDownloadAccessKeys[accesskey][1]][1])
@@ -437,12 +457,12 @@ class FileSystemDownloadHandler(BaseHandler):
 			return
 		self._auto_finish = False
 		self.set_header('Content-Type', 'application/octet-stream')
-		firstname = os.path.split(file_name)[-1]
+		firstname = os.path.split(file_name)[-1].replace(",", "")
 		self.set_header('Content-Disposition', 'attachment; filename=' + (firstname+".zip"))
 		async def thread_c():
 			await filesystem.create_folder_archive(self.get_database_session_from_user(), self, path, Progress=GlobalProgressDict[FileDownloadAccessKeys[accesskey][1]][1])
 			self.complete_progress(FileDownloadAccessKeys[accesskey][1])
-			self.finish()
+			io_loop.asyncio_loop.call_soon_threadsafe(self.finish)
 		threading.Thread(target=asyncio.run, args=(thread_c(),)).start()
 
 class FileSystemLoginHandler(BaseHandler):
@@ -567,6 +587,7 @@ class GetDrivesHandler(BaseHandler):
 	def get(self):
 		drives = []
 		for drive in os.listdir("confidential/drives/"):
+			if drive.startswith("."): continue
 			driveName = os.path.splitext(drive)[0]
 			if driveName == "main":
 				drives.insert(0, driveName)

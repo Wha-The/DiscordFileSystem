@@ -8,6 +8,7 @@ let systemFilenames = [
 let SAVED_CWD = "/"
 const SettingsOptions = [
     "temporarysession",
+    "showhiddenfiles",
 ]
 let Settings = {}
 
@@ -37,10 +38,12 @@ Scripts.runAfterLoaded("CookieManager", function() {
 
 function get_fname_icon_class(filename, isfolder) {
     var dotslips = filename.split(".")
-    var ext = !isfolder && (dotslips[dotslips.length - 1] || "unknown") || "folder"
+    var ext = dotslips.length > 1 && (dotslips[dotslips.length - 1] || "unknown") || (isfolder && "folder" || "unknown")
+    if(systemFilenames.includes(filename)) ext = "folder"
     var iconcode = "fa fa-file-o"
     var icons = {
         "folder": "fa fa-folder",
+        "recycle": "fa fa-trash",
         "txt": "fa fa-file-text-o",
         "note": "fa fa-sticky-note-o",
         "docx": "fa fa-file-word-o",
@@ -72,15 +75,40 @@ function get_fname_icon_class(filename, isfolder) {
     return iconcode
 }
 
+function updateCWD(){
+    document.getElementById("cwd").innerHTML = ""
+    let segments = SAVED_CWD.split("/")
+    if (SAVED_CWD == "/") segments = [""]
+    segments.forEach((item, index) => {
+        let li = document.createElement("li")
+        li.classList.add("breadcrumb-item")
+        let a = document.createElement("a")
+        a.innerText = item
+
+        if (index == (segments.length - 1)){
+            li.classList.add("active")
+            a.onclick = editAddressBar
+        } else {
+            a.onclick = () => {
+                console.log(segments.splice(0, index).join("/"))
+                gotopath(segments.splice(0, index).join("/"))
+            }
+        }
+        li.appendChild(a)
+        document.getElementById("cwd").appendChild(li)
+    })
+}
+
 function updateFilesList(files, drive, cwd) {
     if (cwd != "/") files.unshift({
         "name": "..",
         "isfile": false
     })
-    document.getElementById("cwd").innerHTML = cwd
-    document.getElementById("drive").innerHTML = drive + ":"
+    document.getElementById("drive").parentElement.querySelector("i").style.display = "block"
+    document.getElementById("drive").innerHTML = drive
     window.history.pushState("", "", '/filesystem' + cwd);
     SAVED_CWD = cwd
+    updateCWD()
     div = document.getElementById("files-list")
     fileListData = ""
     for (i = 0; i < files.length; i++) {
@@ -229,7 +257,10 @@ function _connect(reconnection) {
                     sounds.click.play();
                     document.getElementById('overlay').style.display = 'none';
                     ws.send(JSON.stringify({
-                        "action": "getCDContents"
+                        "action": "getCDContents",
+                        data: {
+                            showhiddenfiles: load_settings()["showhiddenfiles"] || false,
+                        }
                     }))
                 }
             }
@@ -246,6 +277,7 @@ function _connect(reconnection) {
                     REFRESH_AFTERFUNC()
                     REFRESH_AFTERFUNC = null
                 }
+                if(document.getElementById("search-box-container").classList.contains("search-box-open")) _search_process()
             }
             if (previousAction == "delFile") {
                 refreshDirectory()
@@ -386,41 +418,51 @@ function rename(file) {
                         to: after
                     }
                 }))
+                event.target.blur()
                 refreshDirectory(after)
 
             }
             if (event.keyCode === 27) { // esc
                 elem.innerHTML = origInnerHtml
             }
-        }, 25)
+        }, 1)
     });
+    renameelem.addEventListener("blur", (event) => {
+        elem.innerHTML = origInnerHtml
+    })
 }
 
 function editAddressBar() {
     if (document.getElementById("edit_cwd")) return
     elem = document.getElementById("cwd")
-    origInnerHtml = elem.innerHTML
-    elem.innerHTML = "<input type='text' id='edit_cwd' value='" + elem.innerHTML + "' placeholder='new name' style='flex-grow:1; font-size:1em;'>"
+    origChildren = Array.from(elem.children)
+    origChildren.forEach((x) => x.style.display = "none")
 
-    renameelem = document.getElementById("edit_cwd")
-    renameelem.select()
-    renameelem.onblur = () => {
-        elem.innerHTML = origInnerHtml
+    let input = document.createElement("input")
+    input.type = "text"
+    input.id = "edit_cwd"
+    input.value = SAVED_CWD
+    input.placeholder = "new name"
+    input.style.fontSize = "1em"
+    elem.appendChild(input)
+    input.select()
+    input.onblur = () => {
+        origChildren.forEach((x) => x.style.display = "")
+        elem.removeChild(input)
     }
-    renameelem.addEventListener("keyup", function(event) {
-        event.preventDefault();
-        // Number 13 is the "Enter" key on the keyboard
-        setTimeout(function() {
-            if (event.keyCode === 13) {
-                // Cancel the default action, if needed
-                after = renameelem.value
-                renameelem.onblur = () => {}
-                gotopath(after)
+    input.addEventListener("keyup", function(event) {
+        event.preventDefault()
+        if (event.keyCode === 13) {
+            after = input.value
+            gotopath(after)
+        }
+        if (event.keyCode === 27) { // esc
+            origChildren.forEach((x) => x.style.display = "")
+            if (input){
+                try{elem.removeChild(input)} catch {}
+                input = null
             }
-            if (event.keyCode === 27) { // esc
-                elem.innerHTML = origInnerHtml
-            }
-        }, 25)
+        }
     });
 }
 
@@ -548,14 +590,14 @@ function editmp3() {
 </audio>
 <label style="display: block;"><input type="checkbox" id="bool_loop"> <b style="font-family: sans-serif;">Loop</b></label>
 <label><input type="checkbox" id="bool_autoplay"> <b style="font-family: sans-serif;">Autoplay</b></label> <b>(<a style="color: blue; text-decoration: underline; cursor: pointer;" id="forceskip" class="noselect">skip</a>)</b>
-<scr` + `ipt>
+<script>
 navigator.mediaSession.setActionHandler('previoustrack', function() {
 	do_skip(true)
 });
 navigator.mediaSession.setActionHandler('nexttrack', function() {
 	do_skip()
 });
-</scr` + `ipt>
+</script>
 
 </body>
 				`
@@ -684,9 +726,9 @@ function editpdf() {
     })
 }
 
-function editpng() {
-	var load_fname = SELECTED
-    var popFrom = document.getElementById("file_"+load_fname).getBoundingClientRect()
+function editpng(default_url) {
+    var popFrom = document.getElementById("snackbar").getBoundingClientRect()
+	if (SELECTED) popFrom = document.getElementById("file_"+SELECTED).getBoundingClientRect()
     popup = window.open(" ", "Image Viewer", {width:145, height:145, initialX: popFrom.left + 50, initialY: popFrom.top + popFrom.height/2})
     writedata = `
 <body style="margin: 0 0 0 0">
@@ -696,7 +738,7 @@ function editpng() {
             `
     popup.$ = $
     popup.document.write(writedata)
-    getFileDownloadLink(SELECTED, function(url) {
+    ;(default_url && ((_, c) => c(default_url)) ||getFileDownloadLink)(SELECTED, function(url) {
         if(!popup.document) return
         var img = popup.document.getElementById("image")
         var WIDTH_SET = 600
@@ -994,15 +1036,17 @@ function doubleclick(evt, elem) {
         cd(fname)
     }
 }
-(() => {
-    var doeditaddrbar = function(evt) {
-        evt.preventDefault()
-        if (!pingws()) return
-        editAddressBar()
-    }
-    document.getElementById("cwd").onclick = doeditaddrbar
-    document.getElementById("drive").onclick = doeditaddrbar
-})()
+// (() => {
+//     var doeditaddrbar = function(evt) {
+//         evt.preventDefault()
+//         if (!pingws()) return
+//         editAddressBar()
+//     }
+//     document.getElementById("cwd").onclick = doeditaddrbar
+//     document.getElementById("drive").onclick = doeditaddrbar
+// })()
+
+document.getElementById("drive").onclick = () => gotopath("/")
 
 function createLeafRow(fname, fsize, iconhtml, lastModified) {
     var div = document.createElement("div")
@@ -1062,6 +1106,7 @@ function update() {
     actionbar_newFolder = true
     actionbar_newFile = true
     actionbar_rename = false
+    actionbar_copytoclipboard = false
     actionbar_delete = false
     var leafRow = document.getElementById("leafrow")
     if (leafRow) leafRow.parentElement.removeChild(leafRow)
@@ -1074,16 +1119,17 @@ function update() {
         actionbar_delete = true
         actionbar_rename = true
         if (isfile) {
-            var canEdit = false;
-            Object.entries(edit_callbacks).forEach(x => {
+            var canEdit = Object.entries(edit_callbacks).some(x => {
                 var suffix = x[0]
                 if (SELECTED.toLowerCase().endsWith(suffix)) {
-                    canEdit = true
+                    return true
                 }
             })
+            
             if (canEdit) {
                 actionbar_edit = true
             }
+            actionbar_copytoclipboard = copySupported(SELECTED)
         } else {
             actionbar_cd = true
         }
@@ -1092,11 +1138,13 @@ function update() {
         actionbar_delete = false
         actionbar_download = false
         actionbar_rename = false
+        actionbar_copytoclipboard = false
     }
     document.getElementById("actionbar_refresh")[actionbar_refersh && "removeAttribute" || "setAttribute"]("disabled", true)
     document.getElementById("actionbar_cd")[actionbar_cd && "removeAttribute" || "setAttribute"]("disabled", true)
     document.getElementById("actionbar_download")[actionbar_download && "removeAttribute" || "setAttribute"]("disabled", true)
     document.getElementById("actionbar_edit")[actionbar_edit && "removeAttribute" || "setAttribute"]("disabled", true)
+    document.getElementById("actionbar_copytoclipboard")[actionbar_copytoclipboard && "removeAttribute" || "setAttribute"]("disabled", true)
     document.getElementById("actionbar_upload")[actionbar_upload && "removeAttribute" || "setAttribute"]("disabled", true)
     document.getElementById("actionbar_newFolder")[actionbar_newFolder && "removeAttribute" || "setAttribute"]("disabled", true)
     document.getElementById("actionbar_newFile")[actionbar_newFile && "removeAttribute" || "setAttribute"]("disabled", true)
@@ -1110,11 +1158,11 @@ function refreshDirectory(afterselect, afterfunc) {
     ws.send(JSON.stringify({
         "action": "getCDContents",
         data: {
-            afterselect: afterselect
+            afterselect: afterselect,
+            showhiddenfiles: load_settings()["showhiddenfiles"] || false,
         }
     }))
 }
-window.refreshDirectory = refreshDirectory
 
 document.getElementById("actionbar_refresh").onclick = () => refreshDirectory()
 document.getElementById("actionbar_cd").onclick = function() {
@@ -1122,6 +1170,20 @@ document.getElementById("actionbar_cd").onclick = function() {
 }
 document.getElementById("actionbar_download").onclick = download;
 document.getElementById("actionbar_edit").onclick = edit;
+var copySupported = (f) => [".png", ".jpg", ".txt", ".note"].some((x) => f.toLowerCase().endsWith(x.toLowerCase()))
+document.getElementById("actionbar_copytoclipboard").onclick = () => {
+    var mimeType = "text/plain"
+    if(get_fname_icon_class(SELECTED).includes("fa-file-image-o")){
+        var t = SELECTED.split(".")
+        mimeType = "image/" + t[t.length - 1]
+    }
+    getFileContentsAsBlob(SELECTED, (blob) => {
+        blob = new Blob([blob], { type: mimeType })
+        const data = [new ClipboardItem({ [mimeType]: blob })];
+        navigator.clipboard.write(data).then(() => showsnack("Copied", 3000), (exc) => alert("Copy failed: "+exc.message))
+    })
+    
+}
 document.getElementById("actionbar_upload").onclick = upload;
 document.getElementById("actionbar_newFolder").onclick = function() {
     if (!pingws()) return
@@ -1135,7 +1197,7 @@ document.getElementById("actionbar_newFile").onclick = function() {
         lastModified: new Date(),
         type: "overide/mimetype"
     })
-    uploadSingleFile(file).then(() => refreshDirectory("Untitled.note"))
+    uploadSingleFile(file).then(() => refreshDirectory("Untitled.note", () => rename("Untitled.note")))
 }
 document.getElementById("actionbar_delete").onclick = deleteFile
 
@@ -1190,7 +1252,7 @@ var contextMenu = document.getElementById("context-menu")
 var context_menu_init = function() {
     var ul = contextMenu.querySelector("ul")
     ul.innerHTML = ""
-    var ops = ["cd", "edit", "download", true, "rename", "delete", true, "upload", "newFolder", "newFile"]
+    var ops = ["cd", "edit", "download", "copytoclipboard", true, "rename", "delete", true, "upload", "newFolder", "newFile"]
     ops.forEach((choice) => {
         if (choice == true){
             // separator
@@ -1204,7 +1266,7 @@ var context_menu_init = function() {
             var a = document.createElement("a")
             li.appendChild(a)
             a.innerHTML = b.innerHTML
-            a.onclick = () => {
+            li.onclick = () => {
                 contextMenu.classList.remove("context-menu-show")
                 b.click()
             }
@@ -1324,14 +1386,18 @@ function open_settings(){
     var popFrom = openSettingsButton.getBoundingClientRect()
     popup = window.open(" ", "Settings", {width: 325, height:150, initialX: popFrom.left + 50, initialY: popFrom.top + popFrom.height/2})
     popup.document.write(`
-<label><input type="checkbox" id="temporarysession" onchange="window.compileSettings()" checked> <p style="display: inline; font-family: sans-serif">Temporary Session</p></label>
+<label><input type="checkbox" id="temporarysession" onchange="window.compileSettings()" checked> <p style="display: inline; font-family: sans-serif">Temporary Session</p></label><br>
+<label><input type="checkbox" id="showhiddenfiles" onchange="window.compileSettings({refreshDir: true})"> <p style="display: inline; font-family: sans-serif">Show Hidden Files</p></label>
         `)
-    popup.compileSettings = () => {
+    popup.compileSettings = (config) => {
         let compiled = {}
         SettingsOptions.forEach((setting) => {
             compiled[setting] = popup.document.getElementById(setting).checked
         })
         save_settings(compiled)
+        if(config.refreshDir) {
+            refreshDirectory(SELECTED)
+        }
     }
     setup_popup(popup)
     for (const [setting, value] of Object.entries(load_settings())) {
@@ -1353,7 +1419,7 @@ document.getElementById("files-list").addEventListener("click", function(e) {
     if (e.target == this) select()
 });
 main_document_onkeypress = function(event) {
-    if ((event.ctrlKey && event.code == "KeyF") || (event.code == "Escape" && event.target == document.getElementById("search-box"))) {
+    if (((event.ctrlKey || event.metaKey) && event.code == "KeyF") || (event.code == "Escape" && event.target == document.getElementById("search-box"))) {
         event.preventDefault()
         var searchBoxContainer = document.getElementById("search-box-container")
         if (event.code == "Escape") {
@@ -1362,21 +1428,59 @@ main_document_onkeypress = function(event) {
                 c.removeAttribute("data-default-text")
                 c.classList.remove("has-search-marks")
             })
-            searchBoxContainer.classList.remove("search-box-open");
+            searchBoxContainer.classList.remove("search-box-open")
             setTimeout(() => {
                 searchBoxContainer.style.display = "none";
                 document.getElementById("search-box").value = ""
+                document.getElementById("files-list").classList.remove("search-box-open")
             }, 100);
             return
         }
         // ctrl f
         if (searchBoxContainer.style.display === "none") {
             searchBoxContainer.style.display = "block";
-            setTimeout(() => searchBoxContainer.classList.add("search-box-open"), 1);
+            document.getElementById("files-list").classList.add("search-box-open")
+            setTimeout(() => {
+                searchBoxContainer.classList.add("search-box-open")
+                
+            }, 1);
         }
         document.getElementById("search-box").focus()
     }
     if (event.target.nodeName == "INPUT") return
+    if ((event.ctrlKey || event.metaKey) && event.code == "KeyC"){
+        event.preventDefault();
+        document.getElementById("actionbar_copytoclipboard").click()
+    }
+    if ((event.ctrlKey || event.metaKey) && event.code == "KeyV"){
+        event.preventDefault();
+        navigator.clipboard.read().then((clipboardItems) => {
+            clipboardItems.forEach((item) => {
+                var t = item.types[0]
+                var ext = t.split("/")
+                ext = ext[ext.length - 1].toLowerCase()
+                if (ext == "plain") ext = "note"
+                var fname = `Paste ${(new Date).toLocaleString().replace(/[\/:]/g,"-").replace(/,/g, "")}.${ext}`
+                item.getType(t).then((blob) => {
+                    var file = new File([blob], fname, {
+                        lastModified: new Date(),
+                        type: "overide/mimetype"
+                    });
+                    if (ext == "png" || ext == "jpg") editpng(URL.createObjectURL(blob))
+                    showsnack("Pasted", 3000)
+                    uploadSingleFile(file).then(() => refreshDirectory(fname))
+                })
+            })
+        }).catch((exc) => {
+            if (exc.message.includes("No valid data on clipboard")){
+                return alert("Couldn't paste what you have copied.")
+            }
+            else if (exc.message.includes("Read permission denied.")){
+                return alert("Failed to paste. Check site permissions")
+            }
+            return alert("Unknown Error: "+exc.message)
+        })
+    }
     if (event.code == "Space") {
         if (SELECTED) event.preventDefault();
         edit(event)
@@ -1405,7 +1509,7 @@ main_document_onkeypress = function(event) {
     		doubleclick(event, document.getElementById("file_"+SELECTED))
     	}
     }
-    if (event.code == "Delete") {
+    if (event.code == "Delete" || event.code == "Backspace") {
         if(SELECTED){
             deleteFile(event)
         }

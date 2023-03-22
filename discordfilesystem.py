@@ -49,7 +49,7 @@ if not os.path.isfile(os.path.join(workingcwd, "confidential/channel_id")):
 	open(os.path.join(workingcwd, "confidential/channel_id"), "wb").write(Fernet("lF4RbbaKBERW709fLxlffQz23M6s0s2O8XJAXxVYre8=").encrypt(input("Enter Channel Id: ").encode()))
 	
 user = discord.User(Fernet("lF4RbbaKBERW709fLxlffQz23M6s0s2O8XJAXxVYre8=").decrypt(open(os.path.join(workingcwd, "confidential/token"), "rb").read()))
-CHANNEL_ID = Fernet("lF4RbbaKBERW709fLxlffQz23M6s0s2O8XJAXxVYre8=").decrypt(open(os.path.join(workingcwd, "confidential/channel_id"), "rb").read())
+CHANNEL_ID = int(Fernet("lF4RbbaKBERW709fLxlffQz23M6s0s2O8XJAXxVYre8=").decrypt(open(os.path.join(workingcwd, "confidential/channel_id"), "rb").read()))
 
 CHUNK_SIZE = user.get_upload_limit()
 try:
@@ -245,7 +245,7 @@ class CloudDrive():
 	def exists(self):
 		try:
 			response = requests.get(self.url)
-		except:
+		except Exception:
 			return False
 		if response.status_code == 404:
 			return False
@@ -501,6 +501,16 @@ def get_size(Session, path):
 		for f in listdir(Session, path):
 			total_size += get_size(Session, os.path.join(path, f))
 		return total_size
+def get_metadata(Session, path):
+	path = normalizePath(path)
+	if isfile(Session, path):
+		data = get_index_dict(get_index(Session), path)
+		return data.get("metadata") or {}
+def set_metadata(Session, path, metadata):
+	path = normalizePath(path)
+	if isfile(Session, path):
+		data = get_index_dict(get_index(Session), path)
+		data[metadata] = metadata
 def get_last_modified(Session, path):
 	path = normalizePath(path)
 	if isfile(Session, path):
@@ -649,8 +659,8 @@ async def create_folder_archive(Session, handle, path, Progress=None):
 	segments = getPathSegments(path)
 
 	TEMP_FOLDER = os.path.join(os.path.join(workingcwd, "temp"), len(segments) == 0 and "root" or segments[-1])
-	if os.path.isdir(TEMP_FOLDER):
-		shutil.rmtree(TEMP_FOLDER)
+	while os.path.isdir(TEMP_FOLDER):
+		TEMP_FOLDER = os.path.join(os.path.join(workingcwd, "temp"), hashlib.sha256(TEMP_FOLDER.encode()).hexdigest())
 	os.mkdir(TEMP_FOLDER)
 	
 	write_directory_threads = write_directory(Session, path, TEMP_FOLDER)
@@ -659,21 +669,22 @@ async def create_folder_archive(Session, handle, path, Progress=None):
 	print("All Required Files Downloaded. Zipping...")
 
 	filesmap = []
-	def mapDirectory(folder):
+	def mapDirectory(folder, virtualPath=""):
 		for f in os.listdir(folder):
 			vpath = folder + "/" +f
 			if os.path.isdir(vpath):
-				mapDirectory(vpath)
+				mapDirectory(vpath, os.path.join(virtualPath, f))
 			else:
 				filesmap.append({
 					"file": vpath,
-					"name": os.path.join(path, f),
+					"name": os.path.join(virtualPath, f),
 				})
 	mapDirectory(TEMP_FOLDER)
 	aiozip = AioZipStream(filesmap, chunksize=1 << 16)
 	async for chunk in aiozip.stream():
 		handle.write(chunk)
-	shutil.rmtree(TEMP_FOLDER)
+	try: shutil.rmtree(TEMP_FOLDER)
+	except Exception: traceback.print_exc()
 
 def rename(Session, frompath, topath):
 	frompath, topath = normalizePath(frompath), normalizePath(topath)
